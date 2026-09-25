@@ -184,32 +184,26 @@ def detect_modality(pil_img, file_bytes=None):
             return "UNKNOWN", 0.0, {"MRI": 0.0, "CT": 0.0, "UNKNOWN": 1.0}
 
         # Domain Feature Overrides (Radiological Skull Calvarium Attenuation & Anatomical Checks)
-        # A) CT Scan Detection Override: CT bone calvarium skull ring is bright white (>225)
-        if features["high_bright_skull_ratio"] > 0.10 or features["bright_skull_ratio"] > 0.20:
+        # A) Non-Medical / Invalid / Color Image Check (Must run FIRST before skull attenuation)
+        if features["color_diff"] > 15.0 or features["white_ratio"] > 0.28 or features["std_intensity"] < 10.0:
+            print(f"[MODALITY] Non-Medical / Invalid Image Features Detected (Color Diff: {features['color_diff']:.2f})")
+            p_unk = 0.999
+            p_mri = 0.000
+            p_ct = 0.000
+
+        # B) CT Scan Detection Override (Only for Grayscale Medical Scans)
+        elif features["high_bright_skull_ratio"] > 0.10 or features["bright_skull_ratio"] > 0.20:
             print(f"[MODALITY] CT Dense Skull Ring Radiodensity Detected (Ratio: {features['bright_skull_ratio']:.4f})")
             p_ct = max(p_ct, 0.984)
             p_mri = min(p_mri, 0.010)
             p_unk = min(p_unk, 0.006)
 
-        # B) Non-Medical / Invalid Image Overrides
-        if features["color_diff"] > 25.0:
-            p_unk = max(p_unk, 0.980)
-            p_mri = min(p_mri, 0.010)
-
-        if features["white_ratio"] > 0.25:
-            p_unk = max(p_unk, 0.980)
-            p_mri = min(p_mri, 0.010)
-
-        if features["std_intensity"] < 12.0:
-            p_unk = max(p_unk, 0.980)
-            p_mri = min(p_mri, 0.010)
-
         # C) Valid Cranial Grayscale MRI Scan Verification
-        if (features["bright_skull_ratio"] < 0.10 and 
-            features["high_bright_skull_ratio"] < 0.05 and 
-            features["color_diff"] < 20.0 and 
-            features["white_ratio"] < 0.20 and 
-            features["std_intensity"] >= 15.0):
+        elif (features["bright_skull_ratio"] < 0.10 and 
+              features["high_bright_skull_ratio"] < 0.05 and 
+              features["color_diff"] < 15.0 and 
+              features["white_ratio"] < 0.20 and 
+              features["std_intensity"] >= 15.0):
             print("[MODALITY] Cranial Grayscale MRI Scan Features Confirmed")
             p_mri = max(p_mri, 0.985)
             p_ct = min(p_ct, 0.010)
@@ -243,7 +237,7 @@ def check_mri_quality(pil_img):
     features = extract_skull_radiodensity_features(pil_img)
     reasons = []
 
-    if features["color_diff"] > 25.0:
+    if features["color_diff"] > 15.0:
         reasons.append("Contains high color saturation. Supported brain MRIs are grayscale.")
 
     if features["white_ratio"] > 0.25:
@@ -286,16 +280,16 @@ def validate_mri_pipeline(pil_img, file_bytes=None):
         }
 
     if modality == "UNKNOWN":
-        print(f"[VALIDATION] UNKNOWN image detected (Confidence: {mod_conf_pct}%)")
+        print(f"[VALIDATION] UNKNOWN / Invalid image detected (Confidence: {mod_conf_pct}%)")
         return {
             "status": "REJECTED_UNKNOWN",
-            "modality": "Unknown",
+            "modality": "Invalid Image",
             "modality_confidence": mod_conf_pct,
             "is_valid_mri": False,
-            "reason": "Unable to verify a valid MRI image. Confidence is below the required threshold (85%).",
+            "reason": "Invalid image detected. Please upload a valid brain MRI scan.",
             "characteristics": [
-                "Image characteristics do not match standard cranial MRI patterns.",
-                "Modality confidence below threshold (85%).",
+                "Image does not match cranial brain MRI scan characteristics.",
+                "Non-medical or invalid image format detected.",
                 "Please upload a clear brain MRI scan."
             ],
             "class_probabilities": probs

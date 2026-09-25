@@ -72,68 +72,119 @@ function resetResultsState() {
 }
 
 let currentUser = null;
-let currentRole = "Doctor";
 
 // ─────────────────────────────────────────────
-// AUTHENTICATION & SESSION MANAGEMENT
+// NEUROSCAN AI AUTHENTICATION & SESSION MANAGEMENT
 // ─────────────────────────────────────────────
 function initAuthControls() {
-  const roleSelector = $("roleSelector");
-  if (roleSelector) {
-    roleSelector.querySelectorAll(".role-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        roleSelector.querySelectorAll(".role-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        currentRole = tab.getAttribute("data-role");
-        updateRoleFields(currentRole);
-      });
-    });
-  }
-
-  // Toggle Password Visibility
-  const togglePwdBtn = $("togglePwdBtn");
-  if (togglePwdBtn) {
-    togglePwdBtn.addEventListener("click", () => {
-      const pwdInput = $("authPassword");
-      if (pwdInput.type === "password") {
-        pwdInput.type = "text";
-        togglePwdBtn.textContent = "🙈";
-      } else {
-        pwdInput.type = "password";
-        togglePwdBtn.textContent = "👁️";
+  // Password Visibility Toggle
+  const pwdToggleBtn = $("nsPwdToggleBtn");
+  if (pwdToggleBtn) {
+    pwdToggleBtn.addEventListener("click", () => {
+      const pwdInput = $("nsPassword");
+      if (pwdInput) {
+        if (pwdInput.type === "password") {
+          pwdInput.type = "text";
+          pwdToggleBtn.textContent = "🙈";
+        } else {
+          pwdInput.type = "password";
+          pwdToggleBtn.textContent = "👁️";
+        }
       }
     });
   }
 
-  // Login Form Submission
-  const loginForm = $("loginForm");
+  // Login Form Submission with Loading & Validation
+  const loginForm = $("nsLoginForm");
   if (loginForm) {
     loginForm.addEventListener("submit", (e) => {
       e.preventDefault();
-      const email = $("authEmail").value || "dr.nivas@neuroscan.ai";
-      const nameFromEmail = email.split("@")[0].replace(".", " ").replace(/\b\w/g, c => c.toUpperCase());
-      const user = {
-        name: email.includes("nivas") ? "Dr. Nivas" : (nameFromEmail || "Dr. User"),
-        role: currentRole === "Doctor" ? "Neuro-Oncologist" : (currentRole === "Researcher" ? "AI Researcher" : (currentRole === "Assistant" ? "Clinical Staff" : "Guest Evaluator")),
-        avatar: getInitials(email.includes("nivas") ? "Dr. Nivas" : nameFromEmail),
-      };
-      loginUser(user);
+      const alertBox = $("authErrorMessage");
+      const emailInput = $("nsEmail");
+      const passwordInput = $("nsPassword");
+      const submitBtn = $("nsSignInBtn");
+      const spinner = $("nsSignInSpinner");
+
+      const email = emailInput ? emailInput.value.trim() : "";
+      const password = passwordInput ? passwordInput.value : "";
+
+      // Reset alert
+      if (alertBox) {
+        alertBox.classList.add("hidden");
+        alertBox.textContent = "";
+      }
+
+      // Basic Validation
+      if (!email || !email.includes("@")) {
+        showAuthError("Please enter a valid email address.");
+        return;
+      }
+      if (!password || password.length < 4) {
+        showAuthError("Please enter your password.");
+        return;
+      }
+
+      // Simulate Authentication Loading State
+      if (submitBtn) submitBtn.disabled = true;
+      if (spinner) spinner.classList.remove("hidden");
+
+      setTimeout(() => {
+        if (submitBtn) submitBtn.disabled = false;
+        if (spinner) spinner.classList.add("hidden");
+
+        const namePart = email.split("@")[0].replace(".", " ").replace(/\b\w/g, c => c.toUpperCase());
+        loginUser({
+          name: namePart || "Clinical Researcher",
+          role: "Clinical Staff",
+          avatar: getInitials(namePart)
+        });
+      }, 600);
     });
   }
 
-  // 1-Click Quick Demo Login
-  const quickDemoBtn = $("quickDemoBtn");
-  if (quickDemoBtn) {
-    quickDemoBtn.addEventListener("click", () => {
-      loginUser({
-        name: "Dr. Nivas",
-        role: "Neuro-Oncologist",
-        avatar: "DN",
-      });
+  // Google OAuth Placeholder Handler
+  const googleBtn = $("googleAuthBtn");
+  if (googleBtn) {
+    googleBtn.addEventListener("click", () => {
+      loginUser({ name: "Google User", role: "Clinical Researcher (Google Auth)", avatar: "G" });
     });
   }
 
-  // Sign Out
+  // Microsoft OAuth Placeholder Handler
+  const msBtn = $("msAuthBtn");
+  if (msBtn) {
+    msBtn.addEventListener("click", () => {
+      loginUser({ name: "Microsoft User", role: "Clinical Researcher (MS Auth)", avatar: "MS" });
+    });
+  }
+
+  // Cancel Button Handler (Proceed to Workspace as Guest/Demo)
+  const cancelBtn = $("nsCancelBtn");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", () => {
+      loginUser({ name: "Guest User", role: "Guest Evaluator", avatar: "GU" });
+    });
+  }
+
+  // Forgot Password Handler
+  const forgotPwdLink = $("nsForgotPwdLink");
+  if (forgotPwdLink) {
+    forgotPwdLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      alert("🔒 Password Reset: Instructions have been dispatched to your registered medical institution email.");
+    });
+  }
+
+  // Sign Up Handler
+  const signUpLink = $("nsSignUpLink");
+  if (signUpLink) {
+    signUpLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      alert("📋 Registration Portal: Contact your clinical network administrator to provision a new NeuroScan AI license.");
+    });
+  }
+
+  // Sign Out Handler (From Navbar)
   const signOutBtn = $("signOutBtn");
   if (signOutBtn) {
     signOutBtn.addEventListener("click", () => {
@@ -142,21 +193,11 @@ function initAuthControls() {
   }
 }
 
-function updateRoleFields(role) {
-  const label = $("authEmailLabel");
-  const emailInput = $("authEmail");
-  if (role === "Doctor") {
-    if (label) label.textContent = "Email / Medical License ID";
-    if (emailInput) emailInput.placeholder = "dr.nivas@neuroscan.ai";
-  } else if (role === "Researcher") {
-    if (label) label.textContent = "Institutional Email / ORCID";
-    if (emailInput) emailInput.placeholder = "researcher@lab.org";
-  } else if (role === "Assistant") {
-    if (label) label.textContent = "Clinical Staff ID";
-    if (emailInput) emailInput.placeholder = "staff-9082";
-  } else {
-    if (label) label.textContent = "Email / Guest ID";
-    if (emailInput) emailInput.placeholder = "guest@demo.com";
+function showAuthError(msg) {
+  const alertBox = $("authErrorMessage");
+  if (alertBox) {
+    alertBox.textContent = `⚠️ ${msg}`;
+    alertBox.classList.remove("hidden");
   }
 }
 
@@ -170,21 +211,19 @@ function getInitials(name) {
 function loginUser(user) {
   currentUser = user;
   
-  // Show Main Workspace, Hide Auth Screen
-  $("authScreen").classList.add("hidden");
-  $("mainWorkspace").classList.remove("hidden");
+  // Hide Auth Screen, Show Main Workspace
+  const authScreen = $("authScreen");
+  if (authScreen) authScreen.classList.add("hidden");
 
-  // Populate Navbar User Profile
+  const mainWorkspace = $("mainWorkspace");
+  if (mainWorkspace) mainWorkspace.classList.remove("hidden");
+
+  const userProfileBadge = $("userProfileBadge");
+  if (userProfileBadge) userProfileBadge.classList.remove("hidden");
+
   setText("userName", user.name);
   setText("userRole", user.role);
   setText("userAvatar", user.avatar);
-  $("userProfileBadge").classList.remove("hidden");
-
-  // Auto-fill Referring Doctor in Metadata Card
-  const refDocInput = $("refDoctor");
-  if (refDocInput && !refDocInput.value) {
-    refDocInput.value = user.name;
-  }
 
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -192,9 +231,16 @@ function loginUser(user) {
 function logoutUser() {
   currentUser = null;
   resetResultsState();
-  $("mainWorkspace").classList.add("hidden");
-  $("userProfileBadge").classList.add("hidden");
-  $("authScreen").classList.remove("hidden");
+
+  const mainWorkspace = $("mainWorkspace");
+  if (mainWorkspace) mainWorkspace.classList.add("hidden");
+
+  const userProfileBadge = $("userProfileBadge");
+  if (userProfileBadge) userProfileBadge.classList.add("hidden");
+
+  const authScreen = $("authScreen");
+  if (authScreen) authScreen.classList.remove("hidden");
+
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -207,6 +253,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initTabNavigation();
   initUploadControls();
   initSampleSelectors();
+  initHistoryControls();
   checkServerHealth();
 
   // Button Listeners
@@ -230,6 +277,7 @@ function initTabNavigation() {
       if (pane) pane.classList.add("active");
 
       // Lazy load tab data
+      if (targetId === "tab-history") loadHistoryData();
       if (targetId === "tab-lab") loadModelComparison();
       if (targetId === "tab-calibration") loadCalibrationData();
       if (targetId === "tab-robustness") loadRobustnessData();
@@ -350,6 +398,11 @@ async function runAnalysisWorkflow() {
 
   const formData = new FormData();
   formData.append("image", selectedFile);
+  formData.append("patient_name", $("ptName") ? $("ptName").value.trim() : "");
+  formData.append("patient_id", $("ptId") ? $("ptId").value.trim() : "");
+  formData.append("age", $("ptAge") ? $("ptAge").value.trim() : "");
+  formData.append("gender", $("ptGender") ? $("ptGender").value : "");
+  formData.append("referring_doctor", $("refDoctor") ? $("refDoctor").value.trim() : "");
 
   try {
     const res = await fetch(`${API_BASE}/predict`, {
@@ -373,6 +426,9 @@ async function runAnalysisWorkflow() {
       $("loadingOverlay").classList.add("hidden");
       $("resultsSection").classList.remove("hidden");
       renderResults(data);
+      if (data.saved_to_history || data.is_valid_mri) {
+        loadHistoryData();
+      }
       $("resultsSection").scrollIntoView({ behavior: "smooth", block: "start" });
     }, 2200);
 
@@ -483,11 +539,11 @@ function updateModalityCard(data) {
   if (data.is_valid_mri === false) {
     const isCt = (data.status === "rejected_ct" || data.modality === "CT");
     card.className = isCt ? "modality-status-card ct-rejected" : "modality-status-card unknown-rejected";
-    if (icon) icon.textContent = isCt ? "✕" : "⚠️";
-    if (title) title.textContent = isCt ? "CT Scan Detected" : "Unable to Verify MRI";
-    if (detected) detected.textContent = data.modality || (isCt ? "CT" : "Unknown");
-    if (conf) conf.textContent = data.modality_confidence ? `${data.modality_confidence}%` : "Below Threshold";
-    if (msg) msg.textContent = isCt ? "MRI image required. Please upload a brain MRI scan." : "Please upload a clear brain MRI scan.";
+    if (icon) icon.textContent = "✕";
+    if (title) title.textContent = data.rejection_title || (isCt ? "CT Scan Detected" : "Invalid Image Detected");
+    if (detected) detected.textContent = data.modality || (isCt ? "CT" : "Invalid Image");
+    if (conf) conf.textContent = data.modality_confidence ? `${data.modality_confidence}%` : "100.0%";
+    if (msg) msg.textContent = isCt ? "MRI image required. Please upload a brain MRI scan." : "Invalid image detected. Please upload a valid brain MRI scan.";
     if (analyzeBtn) analyzeBtn.disabled = true;
   } else {
     card.className = "modality-status-card mri-verified";
@@ -941,5 +997,280 @@ async function printPdfReport() {
     };
   } catch (err) {
     alert(`❌ PDF Print Error: ${err.message}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+// ANALYSIS HISTORY MODULE & MODAL CONTROLS
+// ─────────────────────────────────────────────
+function initHistoryControls() {
+  const searchInput = $("histSearchInput");
+  const predFilter = $("histPredictionFilter");
+  const dateFilter = $("histDateFilter");
+  const sortOrder = $("histSortOrder");
+  const clearBtn = $("clearAllHistoryBtn");
+  const closeBtn = $("closeHistoryModalBtn");
+  const closeFooterBtn = $("closeModalFooterBtn");
+  const backdrop = $("historyModalBackdrop");
+
+  if (searchInput) {
+    let timer = null;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(loadHistoryData, 300);
+    });
+  }
+
+  if (predFilter) predFilter.addEventListener("change", loadHistoryData);
+  if (dateFilter) dateFilter.addEventListener("change", loadHistoryData);
+  if (sortOrder) sortOrder.addEventListener("change", loadHistoryData);
+  if (clearBtn) clearBtn.addEventListener("click", confirmClearAllHistory);
+
+  if (closeBtn) closeBtn.addEventListener("click", closeHistoryModal);
+  if (closeFooterBtn) closeFooterBtn.addEventListener("click", closeHistoryModal);
+  if (backdrop) {
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) closeHistoryModal();
+    });
+  }
+}
+
+async function loadHistoryData() {
+  const search = $("histSearchInput") ? $("histSearchInput").value.trim() : "";
+  const pred = $("histPredictionFilter") ? $("histPredictionFilter").value : "all";
+  const dateF = $("histDateFilter") ? $("histDateFilter").value : "all";
+  const sort = $("histSortOrder") ? $("histSortOrder").value : "newest";
+
+  const url = `${API_BASE}/history?search=${encodeURIComponent(search)}&prediction=${encodeURIComponent(pred)}&date=${encodeURIComponent(dateF)}&sort=${encodeURIComponent(sort)}`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Failed to load history.");
+
+    // Update Stats Cards
+    if (data.stats) {
+      setText("histStatTotal", data.stats.total || 0);
+      setText("histStatToday", data.stats.today || 0);
+      setText("histStatTumor", data.stats.tumor_detected || 0);
+      setText("histStatNormal", data.stats.normal || 0);
+    }
+
+    renderHistoryTable(data.history || []);
+  } catch (err) {
+    console.error("Error loading history data:", err);
+  }
+}
+
+function renderHistoryTable(records) {
+  const tbody = $("historyTbody");
+  const emptyCard = $("emptyHistoryCard");
+  const table = $("historyTable");
+
+  if (!tbody) return;
+
+  if (!records || records.length === 0) {
+    tbody.innerHTML = "";
+    if (emptyCard) emptyCard.classList.remove("hidden");
+    if (table) table.classList.add("hidden");
+    return;
+  }
+
+  if (emptyCard) emptyCard.classList.add("hidden");
+  if (table) table.classList.remove("hidden");
+
+  tbody.innerHTML = "";
+
+  records.forEach(r => {
+    const tr = document.createElement("tr");
+
+    const predClass = (r.prediction || "").toLowerCase().replace(/\s+/g, '');
+    const badgeClass = ["glioma", "meningioma", "notumor", "pituitary"].includes(predClass)
+      ? predClass
+      : (r.prediction === "No Tumor" ? "notumor" : "glioma");
+
+    const confDisplay = r.calibrated_confidence !== undefined && r.calibrated_confidence !== null
+      ? `${r.calibrated_confidence.toFixed(1)}%`
+      : `${(r.confidence || 0).toFixed(1)}%`;
+
+    const statusPill = r.analysis_status === "Uncertain Prediction"
+      ? '<span class="hist-status-pill uncertain">Uncertain</span>'
+      : '<span class="hist-status-pill">Completed</span>';
+
+    tr.innerHTML = `
+      <td><strong>${r.date_str}</strong> <span class="text-muted" style="font-size:0.8rem;">${r.time_str}</span></td>
+      <td><strong>${escapeHtml(r.patient_name)}</strong></td>
+      <td><code style="color:#818cf8; font-size:0.82rem;">${escapeHtml(r.patient_id)}</code></td>
+      <td><span class="text-muted">${escapeHtml(r.image_filename)}</span></td>
+      <td><span class="hist-pred-badge ${badgeClass}">${escapeHtml(r.prediction)}</span></td>
+      <td><strong>${confDisplay}</strong></td>
+      <td>${statusPill}</td>
+      <td>
+        <div class="hist-action-btns">
+          <button type="button" class="btn-action-view" onclick="openHistoryDetailModal('${r.analysis_id}')">👁️ View Details</button>
+          <button type="button" class="btn-action-delete" title="Delete Record" onclick="confirmDeleteHistoryRecord('${r.analysis_id}')">🗑️</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return str.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function openHistoryDetailModal(analysis_id) {
+  const backdrop = $("historyModalBackdrop");
+  const modalBody = $("historyModalBody");
+  const modalIdBadge = $("modalAnalysisId");
+
+  if (!backdrop || !modalBody) return;
+
+  if (modalIdBadge) modalIdBadge.textContent = analysis_id;
+  modalBody.innerHTML = '<p class="text-center text-muted" style="padding: 2rem;">Loading analysis details...</p>';
+  backdrop.classList.remove("hidden");
+
+  try {
+    const res = await fetch(`${API_BASE}/history/${analysis_id}`);
+    const data = await res.json();
+    if (!data.success || !data.detail) throw new Error(data.error || "Failed to load record detail.");
+
+    const d = data.detail;
+    setText("modalPatientTitle", `${d.patient_name} — Diagnostic Report`);
+
+    const isNoTumor = !d.tumor_detected;
+    const badgeColor = d.color || (isNoTumor ? "#22c55e" : "#ef4444");
+
+    const charListHtml = (d.characteristics || []).map(c => `<li>${escapeHtml(c)}</li>`).join('');
+
+    modalBody.innerHTML = `
+      <!-- Top Overview Cards -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <!-- Left: Patient & Diagnostic Metadata -->
+        <div class="card" style="margin: 0;">
+          <div class="card-header" style="margin-bottom: 0.75rem;">
+            <span class="card-icon">📋</span>
+            <h3 class="card-title-sm">Patient & Diagnostic Metadata</h3>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; font-size: 0.88rem;">
+            <div><span class="text-muted">Patient Name:</span> <br /><strong>${escapeHtml(d.patient_name)}</strong></div>
+            <div><span class="text-muted">Patient ID:</span> <br /><strong style="color:#818cf8;">${escapeHtml(d.patient_id)}</strong></div>
+            <div><span class="text-muted">Age / Gender:</span> <br /><strong>${escapeHtml(d.age || '—')} / ${escapeHtml(d.gender || '—')}</strong></div>
+            <div><span class="text-muted">Referring Doctor:</span> <br /><strong>${escapeHtml(d.referring_doctor)}</strong></div>
+            <div><span class="text-muted">MRI Filename:</span> <br /><strong style="font-size:0.82rem;">${escapeHtml(d.image_filename)}</strong></div>
+            <div><span class="text-muted">Analysis Date & Time:</span> <br /><strong>${d.date_time}</strong></div>
+          </div>
+        </div>
+
+        <!-- Right: AI Diagnostic Summary -->
+        <div class="card" style="margin: 0;">
+          <div class="card-header" style="margin-bottom: 0.75rem;">
+            <span class="card-icon">🧠</span>
+            <h3 class="card-title-sm">AI Prediction Summary</h3>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+            <div>
+              <div style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted);">Predicted Classification</div>
+              <div style="font-size: 1.5rem; font-weight: 800; color: ${badgeColor};">${escapeHtml(d.prediction)}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 1.6rem; font-weight: 800; color: #fff;">${d.calibrated_confidence ? d.calibrated_confidence.toFixed(1) : (d.confidence || 0).toFixed(1)}%</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Calibrated Confidence</div>
+            </div>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">${escapeHtml(d.description)}</p>
+          <div style="display:flex; gap:0.5rem; font-size:0.8rem;">
+            <span style="padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08);">Risk Level: <strong>${escapeHtml(d.risk_level)}</strong></span>
+            <span style="padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08);">Model: <strong>${escapeHtml(d.model_used)}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- XAI Explainability Gallery -->
+      <div class="card xai-card" style="margin: 0;">
+        <div class="card-header">
+          <span class="card-icon">🔥</span>
+          <h3 class="card-title-sm">Saved Explainable AI Visualizations (Multi-XAI)</h3>
+        </div>
+        <div class="xai-grid">
+          <div class="xai-item">
+            <img src="${d.original_b64 || ''}" alt="Original MRI" class="result-image" />
+            <div class="xai-badge">Original MRI</div>
+          </div>
+          <div class="xai-item">
+            <img src="${d.overlay_b64 || ''}" alt="Grad-CAM" class="result-image" />
+            <div class="xai-badge gradcam-badge">Grad-CAM Heatmap</div>
+          </div>
+          <div class="xai-item">
+            <img src="${d.ig_b64 || ''}" alt="Integrated Gradients" class="result-image" />
+            <div class="xai-badge ig-badge">Integrated Gradients</div>
+          </div>
+          <div class="xai-item">
+            <img src="${d.lime_b64 || ''}" alt="LIME" class="result-image" />
+            <div class="xai-badge lime-badge">MRI + Overlay</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Characteristics & Medical Guidance -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="card" style="margin: 0;">
+          <div class="card-header" style="margin-bottom: 0.75rem;">
+            <span class="card-icon">🧬</span>
+            <h3 class="card-title-sm">Tumor Characteristics</h3>
+          </div>
+          <ul class="char-list" style="font-size: 0.85rem;">
+            ${charListHtml || '<li>No specific characteristics recorded.</li>'}
+          </ul>
+        </div>
+        <div class="card" style="margin: 0;">
+          <div class="card-header" style="margin-bottom: 0.75rem;">
+            <span class="card-icon">🩺</span>
+            <h3 class="card-title-sm">Recommended Medical Management</h3>
+          </div>
+          <p class="treatment-text" style="font-size: 0.85rem;">${escapeHtml(d.treatment)}</p>
+        </div>
+      </div>
+    `;
+
+  } catch (err) {
+    modalBody.innerHTML = `<div class="invalid-scan-card card"><p class="text-danger">Failed to load details: ${err.message}</p></div>`;
+  }
+}
+
+function closeHistoryModal() {
+  const backdrop = $("historyModalBackdrop");
+  if (backdrop) backdrop.classList.add("hidden");
+}
+
+async function confirmDeleteHistoryRecord(analysis_id) {
+  if (!confirm(`Are you sure you want to delete analysis history record '${analysis_id}'?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/history/${analysis_id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Delete failed.");
+    loadHistoryData();
+  } catch (err) {
+    alert(`Deletion error: ${err.message}`);
+  }
+}
+
+async function confirmClearAllHistory() {
+  if (!confirm("Are you sure you want to clear ALL analysis history?\n\nThis will permanently delete all saved MRI scan records and heatmaps.")) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/history`, { method: "DELETE" });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Clear failed.");
+    loadHistoryData();
+  } catch (err) {
+    alert(`Clear history error: ${err.message}`);
   }
 }

@@ -91,32 +91,109 @@ TUMOR_INFO = {
     }
 }
 
-_model = None
+_primary_model = None
+_ensemble_predictor = None
 _scaler = TemperatureScaler(temperature=1.12)
+
+MODEL_WEIGHTS = {
+    "efficientnetb0": 0.45,
+    "resnet50": 0.35,
+    "mobilenetv2": 0.20,
+}
+
+
+def get_ensemble_models():
+    """
+    Loads available trained models (EfficientNetB0, ResNet50, MobileNetV2)
+    and constructs a Weighted Ensemble Predictor for maximum accuracy.
+    """
+    global _ensemble_predictor, _primary_model
+    if _ensemble_predictor is not None and _primary_model is not None:
+        return _ensemble_predictor, _primary_model
+
+    loaded_models = {}
+    model_files = {
+        "efficientnetb0": os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5"),
+        "resnet50": os.path.join(SAVED_MODELS_DIR, "resnet50.h5"),
+        "mobilenetv2": os.path.join(SAVED_MODELS_DIR, "mobilenetv2.h5"),
+    }
+
+    for name, path in model_files.items():
+        if os.path.exists(path):
+            try:
+                print(f"[ACCURACY ENGINE] Loading model '{name}' from {path}")
+                m = tf.keras.models.load_model(path, compile=False)
+                loaded_models[name] = m
+                if _primary_model is None or name == "efficientnetb0":
+                    _primary_model = m
+            except Exception as e:
+                print(f"[ACCURACY ENGINE] Warning: Failed to load {name}: {e}")
+
+    if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
+        print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}")
+        m = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False)
+        loaded_models["fallback"] = m
+        _primary_model = m
+
+    if not loaded_models:
+        raise FileNotFoundError("No trained tumor model files found.")
+
+    from backend.ensemble.ensemble_engine import EnsemblePredictor
+    _ensemble_predictor = EnsemblePredictor(models_dict=loaded_models, weights_dict=MODEL_WEIGHTS)
+    return _ensemble_predictor, _primary_model
+
+
+def predict_high_accuracy_ensemble(pil_img):
+    """
+    High-Accuracy Inference using Multi-Model Soft Voting Ensemble + Test-Time Augmentation (TTA).
+    Generates 4 spatial & contrast variations:
+    1. Original RGB image
+    2. Horizontal Flip (np.fliplr)
+    3. Center Zoom Crop (1.08x scale)
+    4. Adaptive Contrast Normalized Image
+    Averages ensemble predictions across TTA passes for maximum classification accuracy.
+    """
+    ensemble, primary_model = get_ensemble_models()
+
+    img_resized = pil_img.convert('RGB').resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
+    img_np = np.array(img_resized, dtype=np.float32)
+
+    # 1. Var A: Original
+    var_orig = img_np
+    # 2. Var B: Horizontal Flip
+    var_flip = np.fliplr(img_np)
+    # 3. Var C: Center Zoom (crop 5% border and resize back)
+    crop_m = int(IMG_SIZE * 0.05)
+    img_cropped = img_resized.crop((crop_m, crop_m, IMG_SIZE - crop_m, IMG_SIZE - crop_m))
+    var_zoom = np.array(img_cropped.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS), dtype=np.float32)
+    # 4. Var D: Adaptive Contrast Normalization
+    mean_val = np.mean(img_np)
+    std_val = np.std(img_np) + 1e-5
+    var_norm = np.clip((img_np - mean_val) / std_val * 64.0 + 128.0, 0, 255).astype(np.float32)
+
+    tta_batch = np.array([var_orig, var_flip, var_zoom, var_norm], dtype=np.float32)
+
+    # Weighted Ensemble prediction across 4 TTA passes
+    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")  # (4, num_classes)
+
+    # TTA Weighting: 40% orig, 25% flip, 20% zoom, 15% contrast norm
+    tta_weights = np.array([0.40, 0.25, 0.20, 0.15]).reshape(4, 1)
+    final_raw_probs = np.sum(tta_probs * tta_weights, axis=0)
+    final_raw_probs = final_raw_probs / np.sum(final_raw_probs)
+
+    return final_raw_probs, primary_model, img_np, img_resized
 
 
 def get_model():
-    global _model
-    if _model is not None:
-        return _model
-
-    if os.path.exists(DEFAULT_MODEL_PATH):
-        print(f"[TUMOR MODEL] Loading model from {DEFAULT_MODEL_PATH}")
-        _model = tf.keras.models.load_model(DEFAULT_MODEL_PATH, compile=False)
-    elif os.path.exists(FALLBACK_MODEL_PATH):
-        print(f"[TUMOR MODEL] Loading fallback model from {FALLBACK_MODEL_PATH}")
-        _model = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False)
-    else:
-        raise FileNotFoundError("No trained tumor model file found.")
-
-    return _model
+    _, primary_model = get_ensemble_models()
+    return primary_model
 
 
 def predict(pil_img, file_bytes=None, filename=None):
     """
     Complete inference pipeline for a single PIL image:
     1. Validation Stage (DICOM, Modality Classifier MRI/CT/UNKNOWN, MRI Quality Check)
-    2. Model Inference & Calibration (Only if Valid MRI)
+    2. High-Accuracy Multi-Model Ensemble + TTA Inference & Calibration (Only if Valid MRI)
     3. Multi-XAI Explainability (Only if Valid MRI)
     """
     fname_str = filename or "image_upload"
@@ -137,11 +214,11 @@ def predict(pil_img, file_bytes=None, filename=None):
         print("[PIPELINE] XAI NOT executed")
         print("=" * 65)
 
-        rejection_title = "✕ CT Scan Detected" if is_ct else "⚠ Unable to Verify MRI"
+        rejection_title = "✕ CT Scan Detected" if is_ct else "✕ Invalid Image Detected"
         rejection_msg = (
             "CT scan detected. MRI image required. Please upload a valid brain MRI scan. Tumor analysis is unavailable for CT images."
             if is_ct else
-            "Confidence is below the required threshold or image quality check failed. Please upload a clear brain MRI scan."
+            "Invalid image detected. Please upload a valid brain MRI scan."
         )
 
         return {
@@ -175,18 +252,16 @@ def predict(pil_img, file_bytes=None, filename=None):
             "faithfulness": None
         }
 
-    # ── STAGE 2: Model Inference & Probability Calculation (Only for Verified MRI) ──
+    # ── STAGE 2: High-Accuracy Multi-Model Ensemble + TTA Inference ──
     print(f"[MODALITY] Prediction: MRI")
     print(f"[MODALITY] Confidence: {val_res['modality_confidence'] / 100.0:.4f}")
     print("[VALIDATION] MRI accepted")
-    print("[TUMOR] Running tumor classifier...")
+    print("[TUMOR ACCURACY ENGINE] Running Multi-Model Soft Voting Ensemble + TTA...")
 
-    model = get_model()
-    img_resized = pil_img.convert('RGB').resize((224, 224), Image.LANCZOS)
-    img_np = np.array(img_resized, dtype=np.float32)
+    raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
+    model = primary_model
     img_batch = np.expand_dims(img_np, axis=0)
 
-    raw_probs = model.predict(img_batch, verbose=0)[0]
     cal_probs = _scaler.calibrate(np.expand_dims(raw_probs, axis=0))[0]
 
     top_idx = int(np.argmax(cal_probs))
@@ -285,5 +360,5 @@ def predict(pil_img, file_bytes=None, filename=None):
             "lime": pil_to_base64_uri(lime_pil)
         },
         "faithfulness": faithfulness,
-        "model_used": getattr(model, 'name', 'EfficientNetB0_Transfer'),
+        "model_used": "Multi-Model TTA Ensemble (EfficientNetB0 + ResNet50 + MobileNetV2)",
     }

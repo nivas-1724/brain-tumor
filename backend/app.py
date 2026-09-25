@@ -26,6 +26,18 @@ sys.path.insert(0, BASE_DIR)
 
 from model.predict import predict
 from report import generate_report
+from history_db import (
+    init_db,
+    save_analysis_record,
+    get_all_history,
+    get_history_stats,
+    get_history_detail,
+    delete_history_record,
+    clear_all_history_records,
+    STORAGE_DIR,
+)
+
+init_db()
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -75,6 +87,15 @@ def api_predict():
     if size_mb > MAX_FILE_SIZE_MB:
         return error_response(f"File too large ({size_mb:.1f} MB). Max: {MAX_FILE_SIZE_MB} MB.")
 
+    patient_info = {
+        "patient_name": request.form.get("patient_name", "Anonymous Patient"),
+        "patient_id": request.form.get("patient_id", "PT-2026-EX"),
+        "age": request.form.get("age", ""),
+        "gender": request.form.get("gender", "Male"),
+        "referring_doctor": request.form.get("referring_doctor", "Dr. Nivas"),
+        "image_filename": file.filename,
+    }
+
     try:
         img_bytes = file.read()
         pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -83,12 +104,106 @@ def api_predict():
 
     try:
         result = predict(pil_img, file_bytes=img_bytes, filename=file.filename)
+
+        # Save history ONLY if valid MRI scan
+        if result.get("is_valid_mri", True):
+            try:
+                analysis_id = save_analysis_record(result, patient_info)
+                result["analysis_id"] = analysis_id
+                result["saved_to_history"] = True
+            except Exception as hist_err:
+                print(f"[HISTORY] Failed to save history record: {hist_err}")
+                traceback.print_exc()
+                result["saved_to_history"] = False
+        else:
+            result["saved_to_history"] = False
+
         return jsonify({"success": True, **result})
     except FileNotFoundError as e:
         return error_response(str(e), 503)
     except Exception as e:
         traceback.print_exc()
         return error_response(f"Prediction failed: {str(e)}", 500)
+
+
+# ─────────────────────────────────────────────
+# ANALYSIS HISTORY API ENDPOINTS
+# ─────────────────────────────────────────────
+@app.route("/api/history", methods=["GET"])
+def get_history_api():
+    search = request.args.get("search", "")
+    prediction = request.args.get("prediction", "all")
+    date_filter = request.args.get("date", "all")
+    sort = request.args.get("sort", "newest")
+
+    try:
+        records = get_all_history(
+            search=search,
+            prediction_filter=prediction,
+            date_filter=date_filter,
+            sort_order=sort
+        )
+        stats = get_history_stats()
+        return jsonify({"success": True, "history": records, "stats": stats})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Failed to fetch history: {str(e)}"}), 500
+
+
+@app.route("/api/history/<analysis_id>", methods=["GET"])
+def get_history_detail_api(analysis_id):
+    if not analysis_id or not analysis_id.startswith("ANA-"):
+        return error_response("Invalid Analysis ID format.")
+
+    try:
+        detail = get_history_detail(analysis_id)
+        if not detail:
+            return jsonify({"success": False, "error": f"Analysis record '{analysis_id}' not found."}), 404
+        return jsonify({"success": True, "detail": detail})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Failed to fetch record: {str(e)}"}), 500
+
+
+@app.route("/api/history/<analysis_id>", methods=["DELETE"])
+def delete_history_api(analysis_id):
+    if not analysis_id or not analysis_id.startswith("ANA-"):
+        return error_response("Invalid Analysis ID format.")
+
+    try:
+        success = delete_history_record(analysis_id)
+        if not success:
+            return jsonify({"success": False, "error": f"Analysis record '{analysis_id}' not found."}), 404
+        stats = get_history_stats()
+        return jsonify({"success": True, "message": f"Deleted {analysis_id}", "stats": stats})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Failed to delete record: {str(e)}"}), 500
+
+
+@app.route("/api/history", methods=["DELETE"])
+def clear_history_api():
+    try:
+        cleared_count = clear_all_history_records()
+        stats = get_history_stats()
+        return jsonify({"success": True, "message": f"Cleared all history ({cleared_count} records).", "stats": stats})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Failed to clear history: {str(e)}"}), 500
+
+
+@app.route("/api/history/image/<filename>", methods=["GET"])
+def get_history_image_api(filename):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return error_response("Invalid image filename.")
+
+    filepath = os.path.join(STORAGE_DIR, filename)
+    if not os.path.exists(filepath):
+        return error_response("Image file not found.", 404)
+
+    ext = os.path.splitext(filename)[1].lower()
+    mimetype = "image/png" if ext == ".png" else "image/jpeg"
+    return send_file(filepath, mimetype=mimetype)
 
 
 @app.route("/api/report", methods=["POST"])
