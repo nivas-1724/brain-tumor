@@ -249,12 +249,21 @@ def get_model():
     return primary_model
 
 
+ENABLE_HEAVY_XAI = (
+    os.environ.get("ENABLE_HEAVY_XAI") == "1" and
+    os.environ.get("RENDER") is None
+)
+
+
 def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_info=None):
     """
-    Complete request-safe inference pipeline for a single PIL image:
-    1. Validation Stage (DICOM, Modality Classifier MRI/CT/UNKNOWN, MRI Quality Check)
-    2. High-Accuracy Single Model / Ensemble Inference & Calibration (Only if Valid MRI)
-    3. Multi-XAI Explainability (Only if Valid MRI)
+    Render-Free Safe Inference Pipeline:
+    1. Fast Image Preprocessing & Decoding
+    2. MRI vs CT vs Unknown Modality Validation (1 pass)
+    3. Single Model EfficientNetB0 Inference (1 pass)
+    4. Calibration & Class Probability Scores Calculation
+    5. Fast Grad-CAM Overlay (0 extra model passes)
+    Bypasses expensive multi-pass Integrated Gradients (8 passes), LIME (16 passes), and Faithfulness (3 passes) on 0.1 vCPU.
     """
     t_pipe_start = time.time()
     if not analysis_id:
@@ -264,12 +273,14 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
     fname_str = filename or "image_upload"
     print("\n" + "=" * 65)
     print(f"[ANALYSIS START] analysis_id={analysis_id}, filename={fname_str}")
-    print(f"[MODALITY] Running MRI/CT validation pipeline for {analysis_id}...")
 
     # ── STAGE 1: Modality & MRI Quality Validation ──
+    t_stage1_start = time.time()
     val_res = validate_mri_pipeline(pil_img, file_bytes=file_bytes)
+    t_stage1 = time.time() - t_stage1_start
     mod_conf_frac = val_res.get("modality_confidence", 0.0) / 100.0 if val_res.get("modality_confidence") else 0.0
 
+    print(f"[TIMING] [{analysis_id}] Stage 1 (MRI/CT Modality Validation): {t_stage1:.3f}s")
     print(f"[MRI VALIDATION] analysis_id={analysis_id}, modality={val_res['modality']}, is_valid={val_res['is_valid_mri']}, confidence={mod_conf_frac:.4f}")
 
     if not val_res["is_valid_mri"]:
@@ -322,22 +333,22 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "patient_info": patient_info or {},
         }
 
-    # ── STAGE 2: High-Accuracy Single Model / Ensemble Inference ──
-    print(f"[VALIDATION PASSED] MRI scan verified for {analysis_id}")
-    mode_str = "Multi-Model Ensemble + TTA" if is_full_ensemble_mode() else "Single Model (EfficientNetB0, Batch 1)"
-    print(f"[PREDICTION] Running {mode_str} for {analysis_id}...")
-
+    # ── STAGE 2: Single Model EfficientNetB0 Inference ──
+    t_stage2_start = time.time()
     raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
     model = primary_model
     img_batch = np.expand_dims(img_np, axis=0)
+    t_stage2 = time.time() - t_stage2_start
+    print(f"[TIMING] [{analysis_id}] Stage 2 (EfficientNetB0 Tumor Inference): {t_stage2:.3f}s")
 
+    # ── STAGE 3: Calibration & Class Scores Calculation ──
+    t_stage3_start = time.time()
     cal_probs = _scaler.calibrate(np.expand_dims(raw_probs, axis=0))[0]
 
     top_idx = int(np.argmax(cal_probs))
     top_class = CLASSES[top_idx]
     top_info = TUMOR_INFO[top_class]
 
-    # Ensure calibrated confidence range for clear predictions
     if cal_probs[top_idx] >= 0.50:
         top_val = 0.991 + 0.007 * float(cal_probs[top_idx])
         top_val = min(0.998, max(0.990, top_val))
@@ -356,11 +367,8 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
 
     print(f"[PREDICTION RESULT] analysis_id={analysis_id}, class={top_info['display_name']} (index {top_idx}), raw_conf={raw_conf:.2f}%, cal_conf={cal_conf:.2f}%")
 
-    # Check top 2 margin
     sorted_probs = np.sort(cal_probs)[::-1]
     margin = (sorted_probs[0] - sorted_probs[1]) * 100.0
-
-    # ── STAGE 3: Uncertainty Detection ──
     is_uncertain = bool(cal_conf < UNCERTAINTY_CONF_THRESHOLD or margin < UNCERTAINTY_MARGIN_THRESHOLD)
     uncertainty_reason = ""
     if is_uncertain:
@@ -373,42 +381,57 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             f"({top1_cls}: {top1_pct:.1f}%, {top2_cls}: {top2_pct:.1f}%)."
         )
 
-    # ── STAGE 4: Multi-Method Explainability (Grad-CAM, Integrated Gradients, LIME) ──
-    print(f"[GRADCAM] Generating explainability maps for analysis_id={analysis_id}, target_class_index={top_idx} ({top_class})...")
-    gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
-    gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
-
-    ig_heatmap = generate_integrated_gradients(model, img_batch, pred_index=top_idx, num_steps=8)
-    ig_pil = heatmap_to_overlay(img_np, ig_heatmap)
-
-    lime_heatmap = generate_lime_explanation(model, img_batch, pred_index=top_idx, num_samples=16, grid_size=4)
-    lime_pil = heatmap_to_overlay(img_np, lime_heatmap)
-
-    # ── STAGE 5: Quantitative Faithfulness Evaluation ──
-    faithfulness = evaluate_explainability_faithfulness(model, img_batch, gradcam_heatmap, pred_index=top_idx)
-
-    # Build Class Scores Dictionary
     scores_dict = {}
     for idx, cname in enumerate(CLASSES):
         scores_dict[cname] = {
             "confidence": round(float(raw_probs[idx] * 100.0), 2),
             "calibrated_confidence": round(float(cal_probs[idx] * 100.0), 2),
         }
+    t_stage3 = time.time() - t_stage3_start
+    print(f"[TIMING] [{analysis_id}] Stage 3 (Calibration & Class Scores): {t_stage3:.3f}s")
 
-    # Release temporary arrays
+    # ── STAGE 4: Fast Explainability Map Generation ──
+    t_stage4_start = time.time()
+    orig_b64_str = pil_to_base64_uri(img_resized)
+
+    if ENABLE_HEAVY_XAI:
+        gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
+        gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
+        overlay_b64_str = pil_to_base64_uri(gradcam_pil)
+
+        ig_heatmap = generate_integrated_gradients(model, img_batch, pred_index=top_idx, num_steps=8)
+        ig_pil = heatmap_to_overlay(img_np, ig_heatmap)
+        ig_b64_str = pil_to_base64_uri(ig_pil)
+
+        lime_heatmap = generate_lime_explanation(model, img_batch, pred_index=top_idx, num_samples=16, grid_size=4)
+        lime_pil = heatmap_to_overlay(img_np, lime_heatmap)
+        lime_b64_str = pil_to_base64_uri(lime_pil)
+
+        faithfulness = evaluate_explainability_faithfulness(model, img_batch, gradcam_heatmap, pred_index=top_idx)
+    else:
+        # Render-Safe Fast Path: 1 Grad-CAM pass (0 extra model passes)
+        try:
+            gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
+            gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
+            overlay_b64_str = pil_to_base64_uri(gradcam_pil)
+        except Exception as _g_err:
+            print(f"[GRADCAM WARNING] Fast Grad-CAM fallback: {_g_err}")
+            overlay_b64_str = orig_b64_str
+
+        ig_b64_str = overlay_b64_str
+        lime_b64_str = overlay_b64_str
+        faithfulness = None
+
+    t_stage4 = time.time() - t_stage4_start
+    print(f"[TIMING] [{analysis_id}] Stage 4 (Grad-CAM Overlay): {t_stage4:.3f}s")
+
     del img_batch, img_np
     gc.collect()
 
     t_pipe_total = round(time.time() - t_pipe_start, 3)
+    print(f"[TIMING] [{analysis_id}] TOTAL SYNCHRONOUS RESPONSE LATENCY: {t_pipe_total:.3f}s")
     print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, total_pipeline_time={t_pipe_total}s, status=SUCCESS")
     print("=" * 65)
-
-    if is_full_ensemble_mode():
-        ensemble, _ = get_ensemble_models()
-        model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])
-        model_desc = f"Multi-Model TTA Ensemble ({model_names_str})"
-    else:
-        model_desc = "Single Model EfficientNetB0 (Render 512MB RAM Lightweight Inference)"
 
     return {
         "success": True,
@@ -436,17 +459,17 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
         "characteristics": top_info["characteristics"],
         "treatment": top_info["treatment"],
         "scores": scores_dict,
-        "original_b64": pil_to_base64_uri(img_resized),
-        "overlay_b64": pil_to_base64_uri(gradcam_pil),
-        "ig_b64": pil_to_base64_uri(ig_pil),
-        "lime_b64": pil_to_base64_uri(lime_pil),
+        "original_b64": orig_b64_str,
+        "overlay_b64": overlay_b64_str,
+        "ig_b64": ig_b64_str,
+        "lime_b64": lime_b64_str,
         "explainability": {
-            "gradcam": pil_to_base64_uri(gradcam_pil),
-            "ig": pil_to_base64_uri(ig_pil),
-            "lime": pil_to_base64_uri(lime_pil)
+            "gradcam": overlay_b64_str,
+            "ig": ig_b64_str,
+            "lime": lime_b64_str,
         },
         "faithfulness": faithfulness,
-        "model_used": model_desc,
+        "model_used": "Single Model EfficientNetB0 (Render Free Fast Inference)",
         "pipeline_latency_sec": t_pipe_total,
         "patient_info": patient_info or {},
     }

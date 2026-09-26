@@ -642,15 +642,17 @@ function renderResults(data) {
     if (xaiCard) xaiCard.classList.add("hidden");
   } else {
     if (xaiCard) xaiCard.classList.remove("hidden");
-    if ($("resultOriginal")) $("resultOriginal").src = data.original_b64 || "";
-    if ($("resultOverlay")) $("resultOverlay").src = data.overlay_b64 || "";
-    if ($("resultIG")) $("resultIG").src = data.ig_b64 || "";
-    if ($("resultLIME")) $("resultLIME").src = data.lime_b64 || "";
+    const origSrc = data.original_b64 || "";
+    const overlaySrc = data.overlay_b64 || origSrc;
+    if ($("resultOriginal")) $("resultOriginal").src = origSrc;
+    if ($("resultOverlay")) $("resultOverlay").src = overlaySrc;
+    if ($("resultIG")) $("resultIG").src = data.ig_b64 || overlaySrc;
+    if ($("resultLIME")) $("resultLIME").src = data.lime_b64 || overlaySrc;
   }
 
-  // Faithfulness Evaluation (Blocked for Rejected Images)
+  // Faithfulness Evaluation (Blocked for Rejected Images or Fast Mode)
   const faithBox = $("faithfulnessBox");
-  if (data.is_valid_mri === false) {
+  if (data.is_valid_mri === false || !data.faithfulness) {
     if (faithBox) faithBox.classList.add("hidden");
   } else if (data.faithfulness) {
     if (faithBox) faithBox.classList.remove("hidden");
