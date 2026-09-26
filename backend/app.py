@@ -39,6 +39,17 @@ from history_db import (
 
 init_db()
 
+# Pre-load & warm-up AI models once at application startup for memory efficiency
+try:
+    print("[STARTUP] Pre-loading AI models into memory...")
+    from model.mri_validator import load_modality_model
+    from model.predict import get_ensemble_models
+    load_modality_model()
+    get_ensemble_models()
+    print("[STARTUP] AI models pre-loaded and cached successfully.")
+except Exception as _preload_err:
+    print(f"[STARTUP] Model pre-loading warning: {_preload_err}")
+
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 

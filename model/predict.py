@@ -31,6 +31,20 @@ from backend.explainability.multi_xai import (
     pil_to_base64_uri,
 )
 
+# TensorFlow Memory & Threading Optimization for low-RAM environments
+try:
+    gpus = tf.config.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+except Exception:
+    pass
+
+try:
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(2)
+except Exception:
+    pass
+
 IMG_SIZE = 224
 UNCERTAINTY_CONF_THRESHOLD = 55.0  # % below which prediction is marked uncertain
 UNCERTAINTY_MARGIN_THRESHOLD = 15.0  # % diff between top 2 classes below which is marked uncertain
@@ -104,19 +118,31 @@ MODEL_WEIGHTS = {
 
 def get_ensemble_models():
     """
-    Loads available trained models (EfficientNetB0, ResNet50, MobileNetV2)
+    Loads available trained models (EfficientNetB0, MobileNetV2, ResNet50)
     and constructs a Weighted Ensemble Predictor for maximum accuracy.
+    Memory Safety: On RAM-constrained environments (e.g. Render Free 512MB RAM),
+    the oversized ResNet50 model (172.8 MB file, >500 MB RAM) is safely skipped to
+    prevent OOM SIGKILL, preserving the ensemble with high-accuracy lightweight models (EfficientNetB0 + MobileNetV2).
     """
     global _ensemble_predictor, _primary_model
     if _ensemble_predictor is not None and _primary_model is not None:
         return _ensemble_predictor, _primary_model
 
+    is_low_memory_env = (
+        os.environ.get("RENDER") is not None or
+        os.environ.get("SKIP_HEAVY_MODELS") == "1" or
+        os.environ.get("LOW_RAM_MODE") == "1"
+    )
+
     loaded_models = {}
     model_files = {
         "efficientnetb0": os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5"),
-        "resnet50": os.path.join(SAVED_MODELS_DIR, "resnet50.h5"),
         "mobilenetv2": os.path.join(SAVED_MODELS_DIR, "mobilenetv2.h5"),
     }
+
+    # Only load ResNet50 if NOT on memory-constrained environment (Render 512MB)
+    if not is_low_memory_env or os.environ.get("ENABLE_RESNET50", "0") == "1":
+        model_files["resnet50"] = os.path.join(SAVED_MODELS_DIR, "resnet50.h5")
 
     for name, path in model_files.items():
         if os.path.exists(path):
@@ -327,6 +353,12 @@ def predict(pil_img, file_bytes=None, filename=None):
     print("[PIPELINE] Execution completed successfully")
     print("=" * 65)
 
+    import gc
+    gc.collect()
+
+    ensemble, _ = get_ensemble_models()
+    model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])
+
     return {
         "success": True,
         "is_valid_mri": True,
@@ -360,5 +392,5 @@ def predict(pil_img, file_bytes=None, filename=None):
             "lime": pil_to_base64_uri(lime_pil)
         },
         "faithfulness": faithfulness,
-        "model_used": "Multi-Model TTA Ensemble (EfficientNetB0 + ResNet50 + MobileNetV2)",
+        "model_used": f"Multi-Model TTA Ensemble ({model_names_str})",
     }
