@@ -108,12 +108,15 @@ TUMOR_INFO = {
 import gc
 import time
 
-IS_LIGHTWEIGHT_MODE = (
-    os.environ.get("RENDER") is not None or
-    os.environ.get("RENDER_SERVICE_ID") is not None or
-    os.environ.get("LOW_RAM_MODE") == "1" or
-    os.environ.get("LIGHTWEIGHT_MODE", "1") == "1"
-)
+def is_full_ensemble_mode() -> bool:
+    """
+    Returns True ONLY if FULL_ENSEMBLE=1 or LIGHTWEIGHT_MODE=0 is explicitly set.
+    By default (including Render Free 512MB RAM), returns False to force single-model lightweight mode.
+    """
+    return (
+        os.environ.get("FULL_ENSEMBLE") == "1" or
+        os.environ.get("LIGHTWEIGHT_MODE") == "0"
+    )
 
 _primary_model = None
 _ensemble_predictor = None
@@ -129,8 +132,10 @@ MODEL_WEIGHTS = {
 def get_ensemble_models():
     """
     Loads trained models and constructs Predictor.
-    Memory Safety: On RAM-constrained environments (e.g. Render Free 512MB RAM),
-    loads ONLY 1 primary tumor classification model (EfficientNetB0) to prevent OOM SIGKILL.
+    Memory Safety Strategy:
+    - Default / Production (Render Free 512MB RAM): Loads ONLY 1 primary model ('efficientnetb0.h5').
+      NEVER loads 'mobilenetv2.h5' or 'resnet50.h5'.
+    - Full Ensemble Mode (Opt-in via LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1): Loads multi-model ensemble.
     """
     global _ensemble_predictor, _primary_model
     if _ensemble_predictor is not None and _primary_model is not None:
@@ -138,9 +143,9 @@ def get_ensemble_models():
 
     loaded_models = {}
 
-    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
-        print("[ACCURACY ENGINE] Production Lightweight Mode Active (Render / Low RAM)")
-        print("[ACCURACY ENGINE] Loading ONLY 1 tumor classification model ('efficientnetb0.h5') to preserve 512MB RAM target.")
+    if not is_full_ensemble_mode():
+        print("[ACCURACY ENGINE] Production Single-Model Mode Active (Optimized for 512MB RAM target)")
+        print("[ACCURACY ENGINE] Loading ONLY 'efficientnetb0.h5' for tumor classification. MobileNetV2 and ResNet50 will NOT be loaded.")
 
         eff_path = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
         if os.path.exists(eff_path):
@@ -160,10 +165,14 @@ def get_ensemble_models():
             raise FileNotFoundError("No trained tumor model files found.")
 
         from backend.ensemble.ensemble_engine import EnsemblePredictor
-        _ensemble_predictor = EnsemblePredictor(models_dict=loaded_models, weights_dict={"efficientnetb0": 1.0, "fallback": 1.0})
+        _ensemble_predictor = EnsemblePredictor(
+            models_dict=loaded_models,
+            weights_dict={"efficientnetb0": 1.0, "fallback": 1.0}
+        )
         return _ensemble_predictor, _primary_model
 
-    # Full Multi-Model Ensemble Mode (for non-Render local dev when LIGHTWEIGHT_MODE=0)
+    # OPT-IN ONLY: Full Multi-Model Ensemble Mode (when LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1)
+    print("[ACCURACY ENGINE] Full Multi-Model Ensemble Mode Explicitly Enabled (Opt-in)")
     model_files = {
         "efficientnetb0": os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5"),
         "mobilenetv2": os.path.join(SAVED_MODELS_DIR, "mobilenetv2.h5"),
@@ -200,8 +209,8 @@ def get_ensemble_models():
 def predict_high_accuracy_ensemble(pil_img):
     """
     High-Accuracy Inference.
-    - Production/Render: Uses single model (EfficientNetB0) with batch size 1, TTA disabled for ultra-low memory & fast CPU speed.
-    - Development: Uses Multi-Model Soft Voting Ensemble + TTA.
+    - Default/Production: Single model (EfficientNetB0), batch size 1, TTA disabled for ultra-low RAM (<150MB) & fast speed.
+    - Opt-in (LIGHTWEIGHT_MODE=0): Multi-Model Soft Voting Ensemble + TTA.
     """
     ensemble, primary_model = get_ensemble_models()
 
@@ -209,7 +218,7 @@ def predict_high_accuracy_ensemble(pil_img):
     img_np = np.array(img_resized, dtype=np.float32)
 
     t0 = time.time()
-    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
+    if not is_full_ensemble_mode():
         # Single model fast batch size 1 pass
         img_batch = np.expand_dims(img_np, axis=0)
         try:
@@ -221,7 +230,7 @@ def predict_high_accuracy_ensemble(pil_img):
         print(f"[PRODUCTION INFERENCE] Used Model: EfficientNetB0 (Single Model, Batch Size 1, TTA Disabled). Latency: {t_pred:.3f}s")
         return raw_probs, primary_model, img_np, img_resized
 
-    # Full multi-model ensemble TTA
+    # Full multi-model ensemble TTA (Opt-in only)
     var_orig = img_np
     var_flip = np.fliplr(img_np)
     tta_batch = np.array([var_orig, var_flip], dtype=np.float32)
@@ -315,7 +324,7 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
 
     # ── STAGE 2: High-Accuracy Single Model / Ensemble Inference ──
     print(f"[VALIDATION PASSED] MRI scan verified for {analysis_id}")
-    mode_str = "Single Model (EfficientNetB0, Batch 1)" if (IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0") else "Multi-Model Ensemble + TTA"
+    mode_str = "Multi-Model Ensemble + TTA" if is_full_ensemble_mode() else "Single Model (EfficientNetB0, Batch 1)"
     print(f"[PREDICTION] Running {mode_str} for {analysis_id}...")
 
     raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
@@ -394,12 +403,12 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
     print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, total_pipeline_time={t_pipe_total}s, status=SUCCESS")
     print("=" * 65)
 
-    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
-        model_desc = "Single Model EfficientNetB0 (Render 512MB RAM Lightweight Inference)"
-    else:
+    if is_full_ensemble_mode():
         ensemble, _ = get_ensemble_models()
         model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])
         model_desc = f"Multi-Model TTA Ensemble ({model_names_str})"
+    else:
+        model_desc = "Single Model EfficientNetB0 (Render 512MB RAM Lightweight Inference)"
 
     return {
         "success": True,
