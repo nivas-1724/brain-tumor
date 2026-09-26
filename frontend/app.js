@@ -10,6 +10,7 @@ const $ = id => document.getElementById(id);
 let selectedFile = null;
 let lastResultData = null;
 let currentRequestId = 0;
+let isAnalyzing = false;
 
 const setText = (id, val) => {
   const el = $(id);
@@ -27,6 +28,21 @@ function normalizeTumorLabel(label) {
 }
 
 function buildAnalysisResult(data) {
+  if (data.is_valid_mri === false) {
+    return {
+      prediction: "Not Available",
+      calibratedConfidence: null,
+      rawConfidence: null,
+      tumorDetected: false,
+      riskLevel: "Rejected",
+      color: "#ef4444",
+      description: data.rejection_message || data.reason || "Validation failed.",
+      severity: "Rejected",
+      modelUsed: "None (Pipeline Halted)",
+      dateTime: new Date().toLocaleString()
+    };
+  }
+
   const rawConf = data.raw_confidence !== undefined ? data.raw_confidence : (data.confidence || 0);
   const calConf = data.calibrated_confidence !== undefined ? data.calibrated_confidence : 0;
   const predLabel = normalizeTumorLabel(data.prediction || data.display_name);
@@ -52,6 +68,13 @@ function resetResultsState() {
   lastResultData = null;
   const resultsSec = $("resultsSection");
   if (resultsSec) resultsSec.classList.add("hidden");
+
+  const invalidAlert = $("invalidScanAlert");
+  if (invalidAlert) invalidAlert.classList.add("hidden");
+  const uncertaintyBanner = $("uncertaintyBanner");
+  if (uncertaintyBanner) uncertaintyBanner.classList.add("hidden");
+  const xaiCard = document.querySelector(".xai-card");
+  if (xaiCard) xaiCard.classList.remove("hidden");
 
   setText("diagnosisName", "—");
   setText("diagnosisDesc", "—");
@@ -364,6 +387,7 @@ function initSampleSelectors() {
   document.querySelectorAll(".sample-card").forEach(card => {
     card.addEventListener("click", async () => {
       const cls = card.getAttribute("data-class");
+      resetResultsState();
       try {
         const res = await fetch(`${API_BASE}/samples`);
         const data = await res.json();
@@ -384,10 +408,15 @@ function initSampleSelectors() {
 // SINGLE-PAGE MRI INFERENCE PIPELINE
 // ─────────────────────────────────────────────
 async function runAnalysisWorkflow() {
+  if (isAnalyzing) return;
   if (!selectedFile) {
     alert("Please select or upload an MRI scan first.");
     return;
   }
+
+  isAnalyzing = true;
+  const analyzeBtn = $("analyzeBtn");
+  if (analyzeBtn) analyzeBtn.disabled = true;
 
   const requestId = ++currentRequestId;
   resetResultsState();
@@ -420,6 +449,7 @@ async function runAnalysisWorkflow() {
     if (!data.success) throw new Error(data.error || "Analysis failed");
 
     lastResultData = data;
+    lastResultData.patient_info = getPatientInfo();
 
     setTimeout(() => {
       if (requestId !== currentRequestId) return;
@@ -430,12 +460,17 @@ async function runAnalysisWorkflow() {
         loadHistoryData();
       }
       $("resultsSection").scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 2200);
+    }, 1200);
 
   } catch (err) {
     if (requestId !== currentRequestId) return;
     $("loadingOverlay").classList.add("hidden");
     alert(`Analysis unavailable\n\nUnable to obtain a valid model prediction: ${err.message}`);
+  } finally {
+    isAnalyzing = false;
+    if (selectedFile && $("previewCard") && !$("previewCard").classList.contains("hidden")) {
+      if (analyzeBtn) analyzeBtn.disabled = false;
+    }
   }
 }
 
@@ -449,7 +484,7 @@ function animateLoadingSteps() {
       });
       const curr = $(`step${s}`);
       if (curr) curr.classList.add("active");
-    }, idx * 500);
+    }, idx * 300);
   });
 }
 
@@ -910,13 +945,15 @@ async function loadAblationData() {
 // PDF REPORT GENERATOR
 // ─────────────────────────────────────────────
 function getPatientInfo() {
+  const currentPt = (lastResultData && lastResultData.patient_info) ? lastResultData.patient_info : {};
   return {
-    name: $("ptName").value || "Anonymous Patient",
-    patient_id: $("ptId").value || "PT-2026-EX",
-    age: $("ptAge").value || "45",
-    gender: $("ptGender").value || "Male",
-    referring_doctor: $("refDoctor").value || "Dr. Nivas",
-    file_name: selectedFile ? selectedFile.name : "MRI_Scan.jpg",
+    name: ($("ptName") && $("ptName").value.trim()) || currentPt.patient_name || "Anonymous Patient",
+    patient_id: ($("ptId") && $("ptId").value.trim()) || currentPt.patient_id || "PT-2026-EX",
+    age: ($("ptAge") && $("ptAge").value.trim()) || currentPt.age || "45",
+    gender: ($("ptGender") && $("ptGender").value) || currentPt.gender || "Male",
+    referring_doctor: ($("refDoctor") && $("refDoctor").value.trim()) || currentPt.referring_doctor || "Dr. Nivas",
+    file_name: selectedFile ? selectedFile.name : (currentPt.image_filename || "MRI_Scan.jpg"),
+    analysis_id: lastResultData ? lastResultData.analysis_id : undefined,
   };
 }
 

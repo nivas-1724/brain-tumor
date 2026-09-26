@@ -191,11 +191,15 @@ def generate_report(prediction_data: dict, patient_info: dict = None) -> bytes:
 
     story = []
 
+    analysis_id = pred.get("analysis_id") or patient.get("analysis_id") or "N/A"
+
+    story = []
+
     # 1. Header Banner
     header_data = [[
         Paragraph("🧠  NeuroScan AI — Research Diagnostic Report", ParagraphStyle(
             "hdr", fontName="Helvetica-Bold", fontSize=15, textColor=ACCENT, alignment=TA_LEFT)),
-        Paragraph(f"Date: {date_str}<br/>Time: {time_str}",
+        Paragraph(f"Analysis ID: <b>{analysis_id}</b><br/>Date: {date_str}<br/>Time: {time_str}",
                   ParagraphStyle("hdr2", fontName="Helvetica", fontSize=8, textColor=TEXT_MUTED, alignment=TA_RIGHT)),
     ]]
     header_table = Table(header_data, colWidths=["60%", "40%"])
@@ -221,29 +225,30 @@ def generate_report(prediction_data: dict, patient_info: dict = None) -> bytes:
     tumor_status = "No Tumor Detected" if is_no_tumor else "Tumor Detected"
     model_name = pred.get("model_used") or "EfficientNetB0_Transfer"
     pred_display = pred.get("prediction") or pred.get("display_name") or "Unknown"
-    cal_conf_str = f"{pred.get('calibrated_confidence', 0):.1f}%"
+    cal_conf_val = pred.get('calibrated_confidence') if pred.get('calibrated_confidence') is not None else pred.get('confidence', 0)
+    cal_conf_str = f"{cal_conf_val:.1f}%" if cal_conf_val is not None else "N/A"
     date_time_full = f"{date_str}, {time_str}"
 
     analysis_grid = [
         [
-            Paragraph("Patient Name", styles["muted"]), Paragraph(name, styles["bold"]),
+            Paragraph("Analysis ID", styles["muted"]), Paragraph(analysis_id, ParagraphStyle("aid", fontName="Helvetica-Bold", fontSize=9, textColor=ACCENT_SOFT)),
             Paragraph("Patient ID", styles["muted"]), Paragraph(pid, styles["bold"])
         ],
         [
-            Paragraph("Age / Gender", styles["muted"]), Paragraph(f"{age} / {gender}", styles["bold"]),
-            Paragraph("Referring Doctor", styles["muted"]), Paragraph(doctor, styles["bold"])
+            Paragraph("Patient Name", styles["muted"]), Paragraph(name, styles["bold"]),
+            Paragraph("Age / Gender", styles["muted"]), Paragraph(f"{age} / {gender}", styles["bold"])
         ],
         [
-            Paragraph("File Name", styles["muted"]), Paragraph(file_name, styles["bold"]),
-            Paragraph("Tumor Status", styles["muted"]), Paragraph(tumor_status, ParagraphStyle("ts", fontName="Helvetica-Bold", fontSize=9, textColor=SUCCESS if is_no_tumor else DANGER))
+            Paragraph("Referring Doctor", styles["muted"]), Paragraph(doctor, styles["bold"]),
+            Paragraph("File Name", styles["muted"]), Paragraph(file_name, styles["bold"])
         ],
         [
             Paragraph("Prediction", styles["muted"]), Paragraph(pred_display, ParagraphStyle("p_disp", fontName="Helvetica-Bold", fontSize=9, textColor=tumor_color)),
-            Paragraph("Confidence Score", styles["muted"]), Paragraph(cal_conf_str, ParagraphStyle("c_disp", fontName="Helvetica-Bold", fontSize=9, textColor=ACCENT_SOFT))
+            Paragraph("Tumor Status", styles["muted"]), Paragraph(tumor_status, ParagraphStyle("ts", fontName="Helvetica-Bold", fontSize=9, textColor=SUCCESS if is_no_tumor else DANGER))
         ],
         [
-            Paragraph("Model Used", styles["muted"]), Paragraph(model_name, styles["bold"]),
-            Paragraph("Analysis Date & Time", styles["muted"]), Paragraph(date_time_full, styles["bold"])
+            Paragraph("Confidence Score", styles["muted"]), Paragraph(cal_conf_str, ParagraphStyle("c_disp", fontName="Helvetica-Bold", fontSize=9, textColor=ACCENT_SOFT)),
+            Paragraph("Model Used", styles["muted"]), Paragraph(model_name, styles["bold"])
         ],
     ]
 

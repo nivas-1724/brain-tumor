@@ -68,38 +68,40 @@ def inspect_dicom_metadata(file_bytes):
 
     if file_bytes[128:132] == b"DICM":
         try:
-            try:
-                import pydicom
-                ds = pydicom.dcmread(io.BytesIO(file_bytes), stop_before_pixels=True)
-                mod = str(getattr(ds, "Modality", "")).upper()
-                series_desc = str(getattr(ds, "SeriesDescription", ""))
-                study_desc = str(getattr(ds, "StudyDescription", ""))
-                protocol = str(getattr(ds, "ProtocolName", ""))
-                
-                details = {
-                    "is_dicom": True,
-                    "modality_tag": mod,
-                    "series_desc": series_desc,
-                    "study_desc": study_desc,
-                    "protocol": protocol,
-                }
-                
-                if mod == "MR":
-                    print("[MODALITY] DICOM Header Tag Verified: MR (MRI)")
-                    return "MRI", 0.999, details
-                elif mod == "CT":
-                    print("[MODALITY] DICOM Header Tag Verified: CT (Computed Tomography)")
-                    return "CT", 0.999, details
-                else:
-                    print(f"[MODALITY] DICOM Header Tag Unknown: {mod}")
-                    return "UNKNOWN", 0.950, details
-            except ImportError:
-                if b"MR" in file_bytes[:1000]:
-                    return "MRI", 0.980, {"is_dicom": True, "modality_tag": "MR (parsed)"}
-                elif b"CT" in file_bytes[:1000]:
-                    return "CT", 0.980, {"is_dicom": True, "modality_tag": "CT (parsed)"}
+            import pydicom
+            ds = pydicom.dcmread(io.BytesIO(file_bytes), stop_before_pixels=True, force=True)
+            mod = str(getattr(ds, "Modality", "")).upper()
+            series_desc = str(getattr(ds, "SeriesDescription", ""))
+            study_desc = str(getattr(ds, "StudyDescription", ""))
+            protocol = str(getattr(ds, "ProtocolName", ""))
+            
+            details = {
+                "is_dicom": True,
+                "modality_tag": mod,
+                "series_desc": series_desc,
+                "study_desc": study_desc,
+                "protocol": protocol,
+            }
+            
+            if mod == "MR":
+                print("[MODALITY] DICOM Header Tag Verified: MR (MRI)")
+                return "MRI", 0.999, details
+            elif mod == "CT":
+                print("[MODALITY] DICOM Header Tag Verified: CT (Computed Tomography)")
+                return "CT", 0.999, details
         except Exception as e:
-            print(f"[MODALITY] DICOM header parse error: {e}")
+            print(f"[MODALITY] DICOM pydicom parse warning: {e}")
+
+        # Fallback byte header pattern matching if pydicom dataset tag incomplete
+        if b"MR" in file_bytes[:1000]:
+            print("[MODALITY] DICOM Byte Header Matched: MR")
+            return "MRI", 0.980, {"is_dicom": True, "modality_tag": "MR (parsed)"}
+        elif b"CT" in file_bytes[:1000]:
+            print("[MODALITY] DICOM Byte Header Matched: CT")
+            return "CT", 0.980, {"is_dicom": True, "modality_tag": "CT (parsed)"}
+
+        print("[MODALITY] DICOM Header Tag Unknown")
+        return "UNKNOWN", 0.950, {"is_dicom": True, "modality_tag": "UNKNOWN"}
             
     return None
 

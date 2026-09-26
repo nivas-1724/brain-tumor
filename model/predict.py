@@ -215,33 +215,38 @@ def get_model():
     return primary_model
 
 
-def predict(pil_img, file_bytes=None, filename=None):
+def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_info=None):
     """
-    Complete inference pipeline for a single PIL image:
+    Complete request-safe inference pipeline for a single PIL image:
     1. Validation Stage (DICOM, Modality Classifier MRI/CT/UNKNOWN, MRI Quality Check)
     2. High-Accuracy Multi-Model Ensemble + TTA Inference & Calibration (Only if Valid MRI)
     3. Multi-XAI Explainability (Only if Valid MRI)
     """
+    if not analysis_id:
+        from backend.history_db import generate_analysis_id
+        analysis_id = generate_analysis_id()
+
     fname_str = filename or "image_upload"
     print("\n" + "=" * 65)
-    print(f"[UPLOAD] File received: {fname_str}")
-    print("[MODALITY] Running MRI/CT classifier...")
+    print(f"[ANALYSIS START] analysis_id={analysis_id}, filename={fname_str}")
+    print(f"[MODALITY] Running MRI/CT validation pipeline for {analysis_id}...")
 
     # ── STAGE 1: Modality & MRI Quality Validation ──
     val_res = validate_mri_pipeline(pil_img, file_bytes=file_bytes)
+    mod_conf_frac = val_res.get("modality_confidence", 0.0) / 100.0 if val_res.get("modality_confidence") else 0.0
     
+    print(f"[MRI VALIDATION] analysis_id={analysis_id}, modality={val_res['modality']}, is_valid={val_res['is_valid_mri']}, confidence={mod_conf_frac:.4f}")
+
     if not val_res["is_valid_mri"]:
         is_ct = (val_res["status"] == "REJECTED_CT" or val_res["modality"] == "CT")
         
-        print(f"[MODALITY] Prediction: {val_res['modality']}")
-        print(f"[MODALITY] Confidence: {val_res['modality_confidence'] / 100.0:.4f}")
-        print(f"[VALIDATION] {'CT detected — MRI required' if is_ct else 'Image rejected as UNKNOWN/low quality'}")
-        print("[PIPELINE] Tumor classifier NOT executed")
-        print("[PIPELINE] XAI NOT executed")
+        print(f"[PIPELINE REJECTED] analysis_id={analysis_id}, stage=mri_validation, reason={val_res['reason']}")
+        print(f"[PIPELINE] Tumor classifier NOT executed for {analysis_id}")
+        print(f"[PIPELINE] XAI NOT executed for {analysis_id}")
         print("=" * 65)
 
         rejection_title = "✕ CT Scan Detected" if is_ct else "✕ Invalid Image Detected"
-        rejection_msg = (
+        rejection_message = (
             "CT scan detected. MRI image required. Please upload a valid brain MRI scan. Tumor analysis is unavailable for CT images."
             if is_ct else
             "Invalid image detected. Please upload a valid brain MRI scan."
@@ -249,7 +254,10 @@ def predict(pil_img, file_bytes=None, filename=None):
 
         return {
             "success": True,
+            "analysis_id": analysis_id,
+            "stage": "mri_validation",
             "is_valid_mri": False,
+            "is_mri": False,
             "status": "rejected_ct" if is_ct else "rejected_unknown",
             "modality": val_res["modality"],
             "modality_confidence": val_res["modality_confidence"],
@@ -267,7 +275,7 @@ def predict(pil_img, file_bytes=None, filename=None):
             "uncertainty_reason": "",
             "reason": val_res["reason"],
             "rejection_title": rejection_title,
-            "rejection_message": rejection_msg,
+            "rejection_message": rejection_message,
             "characteristics": val_res["characteristics"],
             "original_b64": pil_to_base64_uri(pil_img.convert('RGB').resize((224, 224))),
             "overlay_b64": None,
@@ -275,14 +283,13 @@ def predict(pil_img, file_bytes=None, filename=None):
             "lime_b64": None,
             "explainability": None,
             "scores": None,
-            "faithfulness": None
+            "faithfulness": None,
+            "patient_info": patient_info or {},
         }
 
     # ── STAGE 2: High-Accuracy Multi-Model Ensemble + TTA Inference ──
-    print(f"[MODALITY] Prediction: MRI")
-    print(f"[MODALITY] Confidence: {val_res['modality_confidence'] / 100.0:.4f}")
-    print("[VALIDATION] MRI accepted")
-    print("[TUMOR ACCURACY ENGINE] Running Multi-Model Soft Voting Ensemble + TTA...")
+    print(f"[VALIDATION PASSED] MRI scan verified for {analysis_id}")
+    print(f"[PREDICTION] Running Multi-Model Soft Voting Ensemble + TTA for {analysis_id}...")
 
     raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
     model = primary_model
@@ -311,6 +318,8 @@ def predict(pil_img, file_bytes=None, filename=None):
     raw_conf = float(raw_probs[top_idx] * 100.0)
     cal_conf = float(cal_probs[top_idx] * 100.0)
 
+    print(f"[PREDICTION RESULT] analysis_id={analysis_id}, class={top_info['display_name']} (index {top_idx}), raw_conf={raw_conf:.2f}%, cal_conf={cal_conf:.2f}%")
+
     # Check top 2 margin
     sorted_probs = np.sort(cal_probs)[::-1]
     margin = (sorted_probs[0] - sorted_probs[1]) * 100.0
@@ -329,7 +338,7 @@ def predict(pil_img, file_bytes=None, filename=None):
         )
 
     # ── STAGE 4: Multi-Method Explainability (Grad-CAM, Integrated Gradients, LIME) ──
-    print("[XAI] Generating explanations...")
+    print(f"[GRADCAM] Generating explainability maps for analysis_id={analysis_id}, target_class_index={top_idx} ({top_class})...")
     gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
     gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
 
@@ -350,7 +359,7 @@ def predict(pil_img, file_bytes=None, filename=None):
             "calibrated_confidence": round(float(cal_probs[idx] * 100.0), 2),
         }
 
-    print("[PIPELINE] Execution completed successfully")
+    print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, status=SUCCESS")
     print("=" * 65)
 
     import gc
@@ -361,7 +370,10 @@ def predict(pil_img, file_bytes=None, filename=None):
 
     return {
         "success": True,
+        "analysis_id": analysis_id,
+        "stage": "complete",
         "is_valid_mri": True,
+        "is_mri": True,
         "status": "uncertain_prediction" if is_uncertain else "confident_prediction",
         "modality": "MRI",
         "modality_confidence": val_res["modality_confidence"],
@@ -393,4 +405,6 @@ def predict(pil_img, file_bytes=None, filename=None):
         },
         "faithfulness": faithfulness,
         "model_used": f"Multi-Model TTA Ensemble ({model_names_str})",
+        "patient_info": patient_info or {},
     }
+

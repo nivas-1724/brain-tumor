@@ -8,6 +8,7 @@ import sys
 import json
 import sqlite3
 import base64
+import uuid
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,13 +68,10 @@ def init_db():
 
 
 def generate_analysis_id() -> str:
-    """Generates sequential Analysis ID: ANA-00001, ANA-00002..."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM analysis_history")
-    count = cursor.fetchone()[0]
-    conn.close()
-    return f"ANA-{(count + 1):05d}"
+    """Generates unique Analysis ID: ANL-YYYYMMDD-XXXXXXXX"""
+    date_str = datetime.now().strftime("%Y%m%d")
+    unique_suffix = uuid.uuid4().hex[:8].upper()
+    return f"ANL-{date_str}-{unique_suffix}"
 
 
 def _save_b64_image(b64_str: str, filename: str) -> str:
@@ -96,13 +94,14 @@ def _save_b64_image(b64_str: str, filename: str) -> str:
         return ""
 
 
-def save_analysis_record(result_data: dict, patient_info: dict) -> str:
+def save_analysis_record(result_data: dict, patient_info: dict, analysis_id: str = None) -> str:
     """
     Saves a successful analysis result to the database and files.
-    Returns the generated analysis_id.
+    Returns the analysis_id.
     """
     init_db()
-    analysis_id = generate_analysis_id()
+    if not analysis_id:
+        analysis_id = result_data.get("analysis_id") or generate_analysis_id()
     now = datetime.now()
     date_str = now.strftime("%d-%m-%Y")
     time_str = now.strftime("%I:%M %p")

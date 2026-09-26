@@ -8,6 +8,7 @@ import sys
 import json
 import traceback
 import io
+import numpy as np
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -28,6 +29,7 @@ from model.predict import predict
 from report import generate_report
 from history_db import (
     init_db,
+    generate_analysis_id,
     save_analysis_record,
     get_all_history,
     get_history_stats,
@@ -38,6 +40,39 @@ from history_db import (
 )
 
 init_db()
+
+def decode_image_bytes(file_bytes: bytes, filename: str = "") -> Image.Image:
+    """
+    Decodes raw file bytes into a PIL Image (RGB) supporting DICOM, PNG, JPG, BMP, WEBP, etc.
+    """
+    if not file_bytes:
+        raise ValueError("Empty file bytes.")
+
+    is_dcm_ext = filename.lower().endswith(".dcm")
+    has_dicm_magic = len(file_bytes) >= 132 and file_bytes[128:132] == b"DICM"
+
+    if is_dcm_ext or has_dicm_magic:
+        try:
+            import pydicom
+            ds = pydicom.dcmread(io.BytesIO(file_bytes))
+            arr = ds.pixel_array.astype(np.float32)
+            arr_min, arr_max = np.min(arr), np.max(arr)
+            if arr_max > arr_min:
+                arr = (arr - arr_min) / (arr_max - arr_min) * 255.0
+            else:
+                arr = np.zeros_like(arr)
+            arr = arr.astype(np.uint8)
+
+            if arr.ndim == 2:
+                return Image.fromarray(arr).convert("RGB")
+            elif arr.ndim == 3:
+                return Image.fromarray(arr).convert("RGB")
+            else:
+                return Image.fromarray(arr[0]).convert("RGB")
+        except Exception as dicom_err:
+            print(f"[IMAGE DECODER] DICOM decode warning: {dicom_err}, trying standard image decode...")
+
+    return Image.open(io.BytesIO(file_bytes)).convert("RGB")
 
 # Pre-load & warm-up AI models once at application startup for memory efficiency
 try:
@@ -98,36 +133,65 @@ def api_predict():
     if size_mb > MAX_FILE_SIZE_MB:
         return error_response(f"File too large ({size_mb:.1f} MB). Max: {MAX_FILE_SIZE_MB} MB.")
 
+    analysis_id = generate_analysis_id()
+    print("\n" + "=" * 65)
+    print(f"[ANALYSIS START] analysis_id={analysis_id}, filename={file.filename}")
+
     patient_info = {
-        "patient_name": request.form.get("patient_name", "Anonymous Patient"),
-        "patient_id": request.form.get("patient_id", "PT-2026-EX"),
-        "age": request.form.get("age", ""),
-        "gender": request.form.get("gender", "Male"),
-        "referring_doctor": request.form.get("referring_doctor", "Dr. Nivas"),
+        "analysis_id": analysis_id,
+        "patient_name": request.form.get("patient_name", "Anonymous Patient").strip() or "Anonymous Patient",
+        "patient_id": request.form.get("patient_id", "PT-2026-EX").strip() or "PT-2026-EX",
+        "age": request.form.get("age", "").strip(),
+        "gender": request.form.get("gender", "Male").strip() or "Male",
+        "referring_doctor": request.form.get("referring_doctor", "Dr. Nivas").strip() or "Dr. Nivas",
         "image_filename": file.filename,
     }
 
+    ext = os.path.splitext(file.filename.lower())[1] or ".png"
+    unique_filename = f"{analysis_id}_original{ext}"
+    saved_upload_path = os.path.join(STORAGE_DIR, unique_filename)
+
     try:
         img_bytes = file.read()
-        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        with open(saved_upload_path, "wb") as f_out:
+            f_out.write(img_bytes)
+        print(f"[UPLOAD] analysis_id={analysis_id}, saved_path={saved_upload_path}")
+    except Exception as upload_err:
+        print(f"[UPLOAD WARNING] Could not save raw file to storage: {upload_err}")
+
+    try:
+        pil_img = decode_image_bytes(img_bytes, filename=file.filename)
     except Exception as e:
+        print(f"[DECODE ERROR] analysis_id={analysis_id}, error={e}")
         return error_response(f"Could not open image: {str(e)}")
 
     try:
-        result = predict(pil_img, file_bytes=img_bytes, filename=file.filename)
+        result = predict(
+            pil_img,
+            file_bytes=img_bytes,
+            filename=file.filename,
+            analysis_id=analysis_id,
+            patient_info=patient_info
+        )
 
         # Save history ONLY if valid MRI scan
         if result.get("is_valid_mri", True):
             try:
-                analysis_id = save_analysis_record(result, patient_info)
-                result["analysis_id"] = analysis_id
+                saved_id = save_analysis_record(result, patient_info, analysis_id=analysis_id)
+                result["analysis_id"] = saved_id
                 result["saved_to_history"] = True
+                print(f"[HISTORY] analysis_id={saved_id}, record saved successfully")
             except Exception as hist_err:
-                print(f"[HISTORY] Failed to save history record: {hist_err}")
+                print(f"[HISTORY ERROR] Failed to save history record for {analysis_id}: {hist_err}")
                 traceback.print_exc()
                 result["saved_to_history"] = False
         else:
+            print(f"[PIPELINE REJECTED] analysis_id={analysis_id}, stage=mri_validation, is_mri=False")
             result["saved_to_history"] = False
+
+        result["patient_info"] = patient_info
+        print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}")
+        print("=" * 65 + "\n")
 
         return jsonify({"success": True, **result})
     except FileNotFoundError as e:
@@ -163,7 +227,7 @@ def get_history_api():
 
 @app.route("/api/history/<analysis_id>", methods=["GET"])
 def get_history_detail_api(analysis_id):
-    if not analysis_id or not analysis_id.startswith("ANA-"):
+    if not analysis_id or not (analysis_id.startswith("ANL-") or analysis_id.startswith("ANA-")):
         return error_response("Invalid Analysis ID format.")
 
     try:
@@ -178,7 +242,7 @@ def get_history_detail_api(analysis_id):
 
 @app.route("/api/history/<analysis_id>", methods=["DELETE"])
 def delete_history_api(analysis_id):
-    if not analysis_id or not analysis_id.startswith("ANA-"):
+    if not analysis_id or not (analysis_id.startswith("ANL-") or analysis_id.startswith("ANA-")):
         return error_response("Invalid Analysis ID format.")
 
     try:
