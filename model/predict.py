@@ -171,13 +171,9 @@ def get_ensemble_models():
 
 def predict_high_accuracy_ensemble(pil_img):
     """
-    High-Accuracy Inference using Multi-Model Soft Voting Ensemble + Test-Time Augmentation (TTA).
-    Generates 4 spatial & contrast variations:
-    1. Original RGB image
-    2. Horizontal Flip (np.fliplr)
-    3. Center Zoom Crop (1.08x scale)
-    4. Adaptive Contrast Normalized Image
-    Averages ensemble predictions across TTA passes for maximum classification accuracy.
+    High-Accuracy & Ultra-Fast Inference using Multi-Model Soft Voting Ensemble + Optimized TTA.
+    1. Original RGB image (65% weight)
+    2. Horizontal Flip (35% weight)
     """
     ensemble, primary_model = get_ensemble_models()
 
@@ -188,22 +184,14 @@ def predict_high_accuracy_ensemble(pil_img):
     var_orig = img_np
     # 2. Var B: Horizontal Flip
     var_flip = np.fliplr(img_np)
-    # 3. Var C: Center Zoom (crop 5% border and resize back)
-    crop_m = int(IMG_SIZE * 0.05)
-    img_cropped = img_resized.crop((crop_m, crop_m, IMG_SIZE - crop_m, IMG_SIZE - crop_m))
-    var_zoom = np.array(img_cropped.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS), dtype=np.float32)
-    # 4. Var D: Adaptive Contrast Normalization
-    mean_val = np.mean(img_np)
-    std_val = np.std(img_np) + 1e-5
-    var_norm = np.clip((img_np - mean_val) / std_val * 64.0 + 128.0, 0, 255).astype(np.float32)
 
-    tta_batch = np.array([var_orig, var_flip, var_zoom, var_norm], dtype=np.float32)
+    tta_batch = np.array([var_orig, var_flip], dtype=np.float32)
 
-    # Weighted Ensemble prediction across 4 TTA passes
-    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")  # (4, num_classes)
+    # Weighted Ensemble prediction across fast 2 TTA passes
+    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")  # (2, num_classes)
 
-    # TTA Weighting: 40% orig, 25% flip, 20% zoom, 15% contrast norm
-    tta_weights = np.array([0.40, 0.25, 0.20, 0.15]).reshape(4, 1)
+    # TTA Weighting: 65% orig, 35% flip
+    tta_weights = np.array([0.65, 0.35]).reshape(2, 1)
     final_raw_probs = np.sum(tta_probs * tta_weights, axis=0)
     final_raw_probs = final_raw_probs / np.sum(final_raw_probs)
 
@@ -342,10 +330,10 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
     gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
     gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
 
-    ig_heatmap = generate_integrated_gradients(model, img_batch, pred_index=top_idx, num_steps=25)
+    ig_heatmap = generate_integrated_gradients(model, img_batch, pred_index=top_idx, num_steps=8)
     ig_pil = heatmap_to_overlay(img_np, ig_heatmap)
 
-    lime_heatmap = generate_lime_explanation(model, img_batch, pred_index=top_idx, num_samples=60)
+    lime_heatmap = generate_lime_explanation(model, img_batch, pred_index=top_idx, num_samples=16, grid_size=4)
     lime_pil = heatmap_to_overlay(img_np, lime_heatmap)
 
     # ── STAGE 5: Quantitative Faithfulness Evaluation ──
@@ -361,9 +349,6 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
 
     print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, status=SUCCESS")
     print("=" * 65)
-
-    import gc
-    gc.collect()
 
     ensemble, _ = get_ensemble_models()
     model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])

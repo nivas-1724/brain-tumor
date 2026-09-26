@@ -75,7 +75,7 @@ def generate_gradcam_heatmap(model, img_batch, pred_index=None):
     return heatmap_resized
 
 
-def generate_integrated_gradients(model, img_batch, pred_index=None, num_steps=30):
+def generate_integrated_gradients(model, img_batch, pred_index=None, num_steps=8):
     """
     Computes Integrated Gradients attribution map relative to a black baseline image.
     img_batch: (1, 224, 224, 3) [0..255]
@@ -108,9 +108,9 @@ def generate_integrated_gradients(model, img_batch, pred_index=None, num_steps=3
     return ig_map
 
 
-def generate_lime_explanation(model, img_batch, pred_index=None, num_samples=80, grid_size=8):
+def generate_lime_explanation(model, img_batch, pred_index=None, num_samples=16, grid_size=4):
     """
-    Generates LIME superpixel attribution explanation.
+    Generates ultra-fast LIME superpixel attribution explanation.
     Splits image into grid_size x grid_size superpixels and fits a linear surrogate model.
     """
     img_2d = img_batch[0]  # (224, 224, 3)

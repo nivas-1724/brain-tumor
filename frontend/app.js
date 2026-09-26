@@ -451,16 +451,13 @@ async function runAnalysisWorkflow() {
     lastResultData = data;
     lastResultData.patient_info = getPatientInfo();
 
-    setTimeout(() => {
-      if (requestId !== currentRequestId) return;
-      $("loadingOverlay").classList.add("hidden");
-      $("resultsSection").classList.remove("hidden");
-      renderResults(data);
-      if (data.saved_to_history || data.is_valid_mri) {
-        loadHistoryData();
-      }
-      $("resultsSection").scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 1200);
+    $("loadingOverlay").classList.add("hidden");
+    $("resultsSection").classList.remove("hidden");
+    renderResults(data);
+    if (data.saved_to_history || data.is_valid_mri) {
+      loadHistoryData();
+    }
+    $("resultsSection").scrollIntoView({ behavior: "smooth", block: "start" });
 
   } catch (err) {
     if (requestId !== currentRequestId) return;
