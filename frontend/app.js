@@ -3,7 +3,7 @@
  * Manages File Uploads, REST API Inference Calls, Multi-XAI Visualizations, and Research Dashboards.
  */
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = "/api";
 
 const $ = id => document.getElementById(id);
 
