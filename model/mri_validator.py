@@ -177,7 +177,10 @@ def detect_modality(pil_img, file_bytes=None):
         img_rgb = pil_img.convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
         img_batch = np.expand_dims(np.array(img_rgb, dtype=np.float32), axis=0)
         
-        preds = model.predict(img_batch, verbose=0)[0]
+        try:
+            preds = model(img_batch, training=False).numpy()[0]
+        except Exception:
+            preds = model.predict(img_batch, verbose=0)[0]
         
         if len(preds) == 3:
             p_mri, p_ct, p_unk = float(preds[0]), float(preds[1]), float(preds[2])

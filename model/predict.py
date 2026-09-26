@@ -105,6 +105,16 @@ TUMOR_INFO = {
     }
 }
 
+import gc
+import time
+
+IS_LIGHTWEIGHT_MODE = (
+    os.environ.get("RENDER") is not None or
+    os.environ.get("RENDER_SERVICE_ID") is not None or
+    os.environ.get("LOW_RAM_MODE") == "1" or
+    os.environ.get("LIGHTWEIGHT_MODE", "1") == "1"
+)
+
 _primary_model = None
 _ensemble_predictor = None
 _scaler = TemperatureScaler(temperature=1.12)
@@ -118,30 +128,48 @@ MODEL_WEIGHTS = {
 
 def get_ensemble_models():
     """
-    Loads available trained models (EfficientNetB0, MobileNetV2, ResNet50)
-    and constructs a Weighted Ensemble Predictor for maximum accuracy.
+    Loads trained models and constructs Predictor.
     Memory Safety: On RAM-constrained environments (e.g. Render Free 512MB RAM),
-    the oversized ResNet50 model (172.8 MB file, >500 MB RAM) is safely skipped to
-    prevent OOM SIGKILL, preserving the ensemble with high-accuracy lightweight models (EfficientNetB0 + MobileNetV2).
+    loads ONLY 1 primary tumor classification model (EfficientNetB0) to prevent OOM SIGKILL.
     """
     global _ensemble_predictor, _primary_model
     if _ensemble_predictor is not None and _primary_model is not None:
         return _ensemble_predictor, _primary_model
 
-    is_low_memory_env = (
-        os.environ.get("RENDER") is not None or
-        os.environ.get("SKIP_HEAVY_MODELS") == "1" or
-        os.environ.get("LOW_RAM_MODE") == "1"
-    )
-
     loaded_models = {}
+
+    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
+        print("[ACCURACY ENGINE] Production Lightweight Mode Active (Render / Low RAM)")
+        print("[ACCURACY ENGINE] Loading ONLY 1 tumor classification model ('efficientnetb0.h5') to preserve 512MB RAM target.")
+
+        eff_path = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
+        if os.path.exists(eff_path):
+            try:
+                print(f"[ACCURACY ENGINE] Loading primary model 'efficientnetb0' from {eff_path}...")
+                _primary_model = tf.keras.models.load_model(eff_path, compile=False)
+                loaded_models["efficientnetb0"] = _primary_model
+            except Exception as e:
+                print(f"[ACCURACY ENGINE] Warning loading efficientnetb0: {e}")
+
+        if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
+            print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}...")
+            _primary_model = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False)
+            loaded_models["fallback"] = _primary_model
+
+        if not loaded_models:
+            raise FileNotFoundError("No trained tumor model files found.")
+
+        from backend.ensemble.ensemble_engine import EnsemblePredictor
+        _ensemble_predictor = EnsemblePredictor(models_dict=loaded_models, weights_dict={"efficientnetb0": 1.0, "fallback": 1.0})
+        return _ensemble_predictor, _primary_model
+
+    # Full Multi-Model Ensemble Mode (for non-Render local dev when LIGHTWEIGHT_MODE=0)
     model_files = {
         "efficientnetb0": os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5"),
         "mobilenetv2": os.path.join(SAVED_MODELS_DIR, "mobilenetv2.h5"),
     }
 
-    # Only load ResNet50 if NOT on memory-constrained environment (Render 512MB)
-    if not is_low_memory_env or os.environ.get("ENABLE_RESNET50", "0") == "1":
+    if os.environ.get("ENABLE_RESNET50", "0") == "1":
         model_files["resnet50"] = os.path.join(SAVED_MODELS_DIR, "resnet50.h5")
 
     for name, path in model_files.items():
@@ -171,29 +199,38 @@ def get_ensemble_models():
 
 def predict_high_accuracy_ensemble(pil_img):
     """
-    High-Accuracy & Ultra-Fast Inference using Multi-Model Soft Voting Ensemble + Optimized TTA.
-    1. Original RGB image (65% weight)
-    2. Horizontal Flip (35% weight)
+    High-Accuracy Inference.
+    - Production/Render: Uses single model (EfficientNetB0) with batch size 1, TTA disabled for ultra-low memory & fast CPU speed.
+    - Development: Uses Multi-Model Soft Voting Ensemble + TTA.
     """
     ensemble, primary_model = get_ensemble_models()
 
     img_resized = pil_img.convert('RGB').resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
     img_np = np.array(img_resized, dtype=np.float32)
 
-    # 1. Var A: Original
+    t0 = time.time()
+    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
+        # Single model fast batch size 1 pass
+        img_batch = np.expand_dims(img_np, axis=0)
+        try:
+            raw_probs = primary_model(img_batch, training=False).numpy()[0]
+        except Exception:
+            raw_probs = primary_model.predict(img_batch, verbose=0)[0]
+        raw_probs = raw_probs / np.sum(raw_probs)
+        t_pred = time.time() - t0
+        print(f"[PRODUCTION INFERENCE] Used Model: EfficientNetB0 (Single Model, Batch Size 1, TTA Disabled). Latency: {t_pred:.3f}s")
+        return raw_probs, primary_model, img_np, img_resized
+
+    # Full multi-model ensemble TTA
     var_orig = img_np
-    # 2. Var B: Horizontal Flip
     var_flip = np.fliplr(img_np)
-
     tta_batch = np.array([var_orig, var_flip], dtype=np.float32)
-
-    # Weighted Ensemble prediction across fast 2 TTA passes
-    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")  # (2, num_classes)
-
-    # TTA Weighting: 65% orig, 35% flip
+    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")
     tta_weights = np.array([0.65, 0.35]).reshape(2, 1)
     final_raw_probs = np.sum(tta_probs * tta_weights, axis=0)
     final_raw_probs = final_raw_probs / np.sum(final_raw_probs)
+    t_pred = time.time() - t0
+    print(f"[FULL ENSEMBLE INFERENCE] Used Multi-Model TTA Ensemble. Latency: {t_pred:.3f}s")
 
     return final_raw_probs, primary_model, img_np, img_resized
 
@@ -207,9 +244,10 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
     """
     Complete request-safe inference pipeline for a single PIL image:
     1. Validation Stage (DICOM, Modality Classifier MRI/CT/UNKNOWN, MRI Quality Check)
-    2. High-Accuracy Multi-Model Ensemble + TTA Inference & Calibration (Only if Valid MRI)
+    2. High-Accuracy Single Model / Ensemble Inference & Calibration (Only if Valid MRI)
     3. Multi-XAI Explainability (Only if Valid MRI)
     """
+    t_pipe_start = time.time()
     if not analysis_id:
         from backend.history_db import generate_analysis_id
         analysis_id = generate_analysis_id()
@@ -222,12 +260,12 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
     # ── STAGE 1: Modality & MRI Quality Validation ──
     val_res = validate_mri_pipeline(pil_img, file_bytes=file_bytes)
     mod_conf_frac = val_res.get("modality_confidence", 0.0) / 100.0 if val_res.get("modality_confidence") else 0.0
-    
+
     print(f"[MRI VALIDATION] analysis_id={analysis_id}, modality={val_res['modality']}, is_valid={val_res['is_valid_mri']}, confidence={mod_conf_frac:.4f}")
 
     if not val_res["is_valid_mri"]:
         is_ct = (val_res["status"] == "REJECTED_CT" or val_res["modality"] == "CT")
-        
+
         print(f"[PIPELINE REJECTED] analysis_id={analysis_id}, stage=mri_validation, reason={val_res['reason']}")
         print(f"[PIPELINE] Tumor classifier NOT executed for {analysis_id}")
         print(f"[PIPELINE] XAI NOT executed for {analysis_id}")
@@ -275,9 +313,10 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "patient_info": patient_info or {},
         }
 
-    # ── STAGE 2: High-Accuracy Multi-Model Ensemble + TTA Inference ──
+    # ── STAGE 2: High-Accuracy Single Model / Ensemble Inference ──
     print(f"[VALIDATION PASSED] MRI scan verified for {analysis_id}")
-    print(f"[PREDICTION] Running Multi-Model Soft Voting Ensemble + TTA for {analysis_id}...")
+    mode_str = "Single Model (EfficientNetB0, Batch 1)" if (IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0") else "Multi-Model Ensemble + TTA"
+    print(f"[PREDICTION] Running {mode_str} for {analysis_id}...")
 
     raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
     model = primary_model
@@ -347,11 +386,20 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "calibrated_confidence": round(float(cal_probs[idx] * 100.0), 2),
         }
 
-    print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, status=SUCCESS")
+    # Release temporary arrays
+    del img_batch, img_np
+    gc.collect()
+
+    t_pipe_total = round(time.time() - t_pipe_start, 3)
+    print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, total_pipeline_time={t_pipe_total}s, status=SUCCESS")
     print("=" * 65)
 
-    ensemble, _ = get_ensemble_models()
-    model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])
+    if IS_LIGHTWEIGHT_MODE and os.environ.get("LIGHTWEIGHT_MODE") != "0":
+        model_desc = "Single Model EfficientNetB0 (Render 512MB RAM Lightweight Inference)"
+    else:
+        ensemble, _ = get_ensemble_models()
+        model_names_str = " + ".join([m.title() if m == 'efficientnetb0' else ('MobileNetV2' if m == 'mobilenetv2' else 'ResNet50') for m in ensemble.models.keys()])
+        model_desc = f"Multi-Model TTA Ensemble ({model_names_str})"
 
     return {
         "success": True,
@@ -389,7 +437,8 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "lime": pil_to_base64_uri(lime_pil)
         },
         "faithfulness": faithfulness,
-        "model_used": f"Multi-Model TTA Ensemble ({model_names_str})",
+        "model_used": model_desc,
+        "pipeline_latency_sec": t_pipe_total,
         "patient_info": patient_info or {},
     }
 

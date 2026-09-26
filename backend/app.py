@@ -74,14 +74,33 @@ def decode_image_bytes(file_bytes: bytes, filename: str = "") -> Image.Image:
 
     return Image.open(io.BytesIO(file_bytes)).convert("RGB")
 
-# Pre-load & warm-up AI models once at application startup for memory efficiency
+# Pre-load & warm-up AI models once at application startup for low-RAM efficiency
 try:
+    import time
+    import gc
+    t_start_load = time.time()
     print("[STARTUP] Pre-loading AI models into memory...")
     from model.mri_validator import load_modality_model
     from model.predict import get_ensemble_models
-    load_modality_model()
-    get_ensemble_models()
-    print("[STARTUP] AI models pre-loaded and cached successfully.")
+    
+    mod_model = load_modality_model()
+    ens_pred, prim_model = get_ensemble_models()
+    
+    # Warm-up TensorFlow execution graph once at startup
+    dummy_input = np.zeros((1, 224, 224, 3), dtype=np.float32)
+    if mod_model is not None:
+        try:
+            _ = mod_model(dummy_input, training=False)
+        except Exception:
+            pass
+    if prim_model is not None:
+        try:
+            _ = prim_model(dummy_input, training=False)
+        except Exception:
+            pass
+            
+    print(f"[STARTUP] AI models pre-loaded and warmed up in {time.time() - t_start_load:.2f}s successfully.")
+    gc.collect()
 except Exception as _preload_err:
     print(f"[STARTUP] Model pre-loading warning: {_preload_err}")
 
@@ -193,6 +212,7 @@ def api_predict():
         print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}")
         print("=" * 65 + "\n")
 
+        gc.collect()
         return jsonify({"success": True, **result})
     except FileNotFoundError as e:
         return error_response(str(e), 503)

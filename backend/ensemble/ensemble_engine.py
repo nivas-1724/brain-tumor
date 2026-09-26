@@ -29,7 +29,14 @@ class EnsemblePredictor:
             raise ValueError("No models loaded in EnsemblePredictor.")
 
         model_names = list(self.models.keys())
-        predictions = [self.models[name].predict(X, verbose=0) for name in model_names]
+        predictions = []
+        for name in model_names:
+            m = self.models[name]
+            try:
+                preds = m(X, training=False).numpy()
+            except Exception:
+                preds = m.predict(X, verbose=0)
+            predictions.append(preds)
 
         if method == "average":
             return np.mean(predictions, axis=0)
@@ -56,3 +63,4 @@ class EnsemblePredictor:
             for p, w in zip(predictions, norm_weights):
                 weighted_probs += w * p
             return weighted_probs
+

@@ -30,31 +30,36 @@ def generate_gradcam_heatmap(model, img_batch, pred_index=None):
     Generates Grad-CAM activation heatmap for the target predicted class.
     img_batch: (1, 224, 224, 3) [0..255]
     """
-    target_layer_name = find_target_conv_layer(model)
-    if not target_layer_name:
-        # Fallback to dummy heatmap if no conv layer found
-        return np.zeros((224, 224), dtype=np.float32)
+    grad_model = getattr(model, "_cached_grad_model", None)
+    if grad_model is None:
+        target_layer_name = find_target_conv_layer(model)
+        if not target_layer_name:
+            return np.zeros((224, 224), dtype=np.float32)
 
-    # Build sub-model capturing conv output & final predictions
-    try:
-        conv_layer = model.get_layer(target_layer_name)
-        grad_model = tf.keras.models.Model(
-            inputs=[model.inputs],
-            outputs=[conv_layer.output, model.output]
-        )
-    except Exception:
-        # Handle nested base models
-        for layer in model.layers:
-            if hasattr(layer, 'layers'):
-                try:
-                    conv_layer = layer.get_layer(target_layer_name)
-                    grad_model = tf.keras.models.Model(
-                        inputs=[model.inputs],
-                        outputs=[conv_layer.output, model.output]
-                    )
-                    break
-                except Exception:
-                    pass
+        try:
+            conv_layer = model.get_layer(target_layer_name)
+            grad_model = tf.keras.models.Model(
+                inputs=[model.inputs],
+                outputs=[conv_layer.output, model.output]
+            )
+        except Exception:
+            for layer in model.layers:
+                if hasattr(layer, 'layers'):
+                    try:
+                        conv_layer = layer.get_layer(target_layer_name)
+                        grad_model = tf.keras.models.Model(
+                            inputs=[model.inputs],
+                            outputs=[conv_layer.output, model.output]
+                        )
+                        break
+                    except Exception:
+                        pass
+
+        if grad_model is not None:
+            model._cached_grad_model = grad_model
+
+    if grad_model is None:
+        return np.zeros((224, 224), dtype=np.float32)
 
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_batch)
@@ -82,7 +87,10 @@ def generate_integrated_gradients(model, img_batch, pred_index=None, num_steps=8
     """
     baseline = np.zeros_like(img_batch)
     if pred_index is None:
-        preds = model.predict(img_batch, verbose=0)
+        try:
+            preds = model(img_batch, training=False).numpy()
+        except Exception:
+            preds = model.predict(img_batch, verbose=0)
         pred_index = np.argmax(preds[0])
 
     alphas = np.linspace(0.0, 1.0, num_steps)
@@ -120,7 +128,10 @@ def generate_lime_explanation(model, img_batch, pred_index=None, num_samples=16,
     num_masks = grid_size * grid_size
 
     if pred_index is None:
-        preds = model.predict(img_batch, verbose=0)
+        try:
+            preds = model(img_batch, training=False).numpy()
+        except Exception:
+            preds = model.predict(img_batch, verbose=0)
         pred_index = np.argmax(preds[0])
 
     # Generate random binary perturbation masks
@@ -139,7 +150,10 @@ def generate_lime_explanation(model, img_batch, pred_index=None, num_samples=16,
         perturbed_images.append(p_img)
 
     perturbed_batch = np.array(perturbed_images, dtype=np.float32)
-    preds = model.predict(perturbed_batch, verbose=0)
+    try:
+        preds = model(perturbed_batch, training=False).numpy()
+    except Exception:
+        preds = model.predict(perturbed_batch, verbose=0)
     target_probs = preds[:, pred_index]
 
     # Fit Ridge linear surrogate model
@@ -160,19 +174,8 @@ def generate_lime_explanation(model, img_batch, pred_index=None, num_samples=16,
 def evaluate_explainability_faithfulness(model, img_batch, attribution_map, pred_index=None, mask_pct=0.15):
     """
     Quantitatively evaluates explanation faithfulness by masking top important pixels vs random pixels.
-    Returns:
-        important_drop: percentage drop in confidence when masking top important regions
-        random_drop: percentage drop in confidence when masking random regions
-        is_faithful: True if important_drop > random_drop
+    Uses a single batch size=3 pass for ultra-fast execution.
     """
-    if pred_index is None:
-        orig_preds = model.predict(img_batch, verbose=0)
-        pred_index = np.argmax(orig_preds[0])
-        orig_conf = float(orig_preds[0, pred_index])
-    else:
-        orig_preds = model.predict(img_batch, verbose=0)
-        orig_conf = float(orig_preds[0, pred_index])
-
     flat_attr = attribution_map.flatten()
     k = int(len(flat_attr) * mask_pct)
     top_indices = np.argpartition(flat_attr, -k)[-k:]
@@ -190,11 +193,19 @@ def evaluate_explainability_faithfulness(model, img_batch, attribution_map, pred
     flat_rand[random_indices] = 0
     img_random_masked[0] = flat_rand.reshape(224, 224, 3)
 
-    imp_preds = model.predict(img_important_masked, verbose=0)
-    rand_preds = model.predict(img_random_masked, verbose=0)
+    # Run single batch of 3 images [orig, important_masked, random_masked]
+    batch_3 = np.concatenate([img_batch, img_important_masked, img_random_masked], axis=0)
+    try:
+        preds_3 = model(batch_3, training=False).numpy()
+    except Exception:
+        preds_3 = model.predict(batch_3, verbose=0)
 
-    imp_conf = float(imp_preds[0, pred_index])
-    rand_conf = float(rand_preds[0, pred_index])
+    if pred_index is None:
+        pred_index = np.argmax(preds_3[0])
+
+    orig_conf = float(preds_3[0, pred_index])
+    imp_conf = float(preds_3[1, pred_index])
+    rand_conf = float(preds_3[2, pred_index])
 
     important_drop = max(0.0, (orig_conf - imp_conf) * 100.0)
     random_drop = max(0.0, (orig_conf - rand_conf) * 100.0)
