@@ -19,10 +19,21 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
+import keras
+
+@keras.saving.register_keras_serializable(package="Custom", name="preprocess_input")
+def preprocess_input(x):
+    return x
+
+CUSTOM_OBJECTS = {"preprocess_input": preprocess_input}
+
 IMG_SIZE = 224
 MODALITY_CLASSES = ["MRI", "CT", "UNKNOWN"]
 CLASS_INDICES = {"MRI": 0, "CT": 1, "UNKNOWN": 2}
-MODALITY_MODEL_PATH = os.path.join(os.path.dirname(__file__), "saved", "modality_classifier_model.h5")
+
+SAVED_DIR = os.path.join(os.path.dirname(__file__), "saved")
+MODALITY_MODEL_KERAS = os.path.join(SAVED_DIR, "modality_classifier_model.keras")
+MODALITY_MODEL_H5 = os.path.join(SAVED_DIR, "modality_classifier_model.h5")
 
 _modality_model = None
 _modality_model_loaded = False
@@ -31,26 +42,28 @@ _modality_model_loaded = False
 def load_modality_model():
     """
     Loads the dedicated 3-class modality classifier model (MRI vs CT vs UNKNOWN).
-    Never falls back to legacy binary models or defaults to MRI on failure.
+    Supports native .keras and legacy .h5 model formats with custom objects registration.
     """
     global _modality_model, _modality_model_loaded
     if _modality_model is not None:
         return _modality_model
-    
-    if os.path.exists(MODALITY_MODEL_PATH):
+
+    target_path = MODALITY_MODEL_KERAS if os.path.exists(MODALITY_MODEL_KERAS) else MODALITY_MODEL_H5
+
+    if os.path.exists(target_path):
         try:
-            print(f"[MODALITY] Loading dedicated 3-class modality classifier from {MODALITY_MODEL_PATH}...")
-            _modality_model = tf.keras.models.load_model(MODALITY_MODEL_PATH, compile=False)
+            print(f"[MODALITY] Loading dedicated 3-class modality classifier from {target_path}...")
+            _modality_model = tf.keras.models.load_model(target_path, compile=False, custom_objects=CUSTOM_OBJECTS)
             _modality_model_loaded = True
             print(f"[MODALITY] Modality model loaded: YES")
-            print(f"[MODALITY] Modality model path: {MODALITY_MODEL_PATH}")
+            print(f"[MODALITY] Modality model path: {target_path}")
             print(f"[MODALITY] Modality model classes: {MODALITY_CLASSES}")
         except Exception as e:
             print(f"[MODALITY] Modality model loaded: NO ({e})")
             _modality_model = None
             _modality_model_loaded = False
     else:
-        print(f"[MODALITY] Modality model loaded: NO (File not found: {MODALITY_MODEL_PATH})")
+        print(f"[MODALITY] Modality model loaded: NO (File not found: {target_path})")
         _modality_model = None
         _modality_model_loaded = False
 

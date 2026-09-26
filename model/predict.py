@@ -49,9 +49,24 @@ IMG_SIZE = 224
 UNCERTAINTY_CONF_THRESHOLD = 55.0  # % below which prediction is marked uncertain
 UNCERTAINTY_MARGIN_THRESHOLD = 15.0  # % diff between top 2 classes below which is marked uncertain
 
+import gc
+import time
+import keras
+
+@keras.saving.register_keras_serializable(package="Custom", name="preprocess_input")
+def preprocess_input(x):
+    return x
+
+CUSTOM_OBJECTS = {"preprocess_input": preprocess_input}
+
 SAVED_MODELS_DIR = os.path.join(BASE_DIR, "backend", "models", "saved_models")
-DEFAULT_MODEL_PATH = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
-FALLBACK_MODEL_PATH = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.h5")
+DEFAULT_MODEL_KERAS = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.keras")
+DEFAULT_MODEL_H5 = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
+DEFAULT_MODEL_PATH = DEFAULT_MODEL_KERAS if os.path.exists(DEFAULT_MODEL_KERAS) else DEFAULT_MODEL_H5
+
+FALLBACK_MODEL_KERAS = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.keras")
+FALLBACK_MODEL_H5 = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.h5")
+FALLBACK_MODEL_PATH = FALLBACK_MODEL_KERAS if os.path.exists(FALLBACK_MODEL_KERAS) else FALLBACK_MODEL_H5
 
 CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
 
@@ -105,8 +120,6 @@ TUMOR_INFO = {
     }
 }
 
-import gc
-import time
 
 def is_full_ensemble_mode() -> bool:
     """
@@ -129,12 +142,20 @@ MODEL_WEIGHTS = {
 }
 
 
+def _get_existing_model_path(model_name: str) -> str:
+    """Returns .keras path if exists, else .h5 path."""
+    keras_p = os.path.join(SAVED_MODELS_DIR, f"{model_name}.keras")
+    if os.path.exists(keras_p):
+        return keras_p
+    return os.path.join(SAVED_MODELS_DIR, f"{model_name}.h5")
+
+
 def get_ensemble_models():
     """
     Loads trained models and constructs Predictor.
     Memory Safety Strategy:
-    - Default / Production (Render Free 512MB RAM): Loads ONLY 1 primary model ('efficientnetb0.h5').
-      NEVER loads 'mobilenetv2.h5' or 'resnet50.h5'.
+    - Default / Production (Render Free 512MB RAM): Loads ONLY 1 primary model ('efficientnetb0.keras' or 'efficientnetb0.h5').
+      NEVER loads 'mobilenetv2' or 'resnet50'.
     - Full Ensemble Mode (Opt-in via LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1): Loads multi-model ensemble.
     """
     global _ensemble_predictor, _primary_model
@@ -145,20 +166,19 @@ def get_ensemble_models():
 
     if not is_full_ensemble_mode():
         print("[ACCURACY ENGINE] Production Single-Model Mode Active (Optimized for 512MB RAM target)")
-        print("[ACCURACY ENGINE] Loading ONLY 'efficientnetb0.h5' for tumor classification. MobileNetV2 and ResNet50 will NOT be loaded.")
 
-        eff_path = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
+        eff_path = _get_existing_model_path("efficientnetb0")
         if os.path.exists(eff_path):
             try:
                 print(f"[ACCURACY ENGINE] Loading primary model 'efficientnetb0' from {eff_path}...")
-                _primary_model = tf.keras.models.load_model(eff_path, compile=False)
+                _primary_model = tf.keras.models.load_model(eff_path, compile=False, custom_objects=CUSTOM_OBJECTS)
                 loaded_models["efficientnetb0"] = _primary_model
             except Exception as e:
                 print(f"[ACCURACY ENGINE] Warning loading efficientnetb0: {e}")
 
         if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
             print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}...")
-            _primary_model = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False)
+            _primary_model = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False, custom_objects=CUSTOM_OBJECTS)
             loaded_models["fallback"] = _primary_model
 
         if not loaded_models:
@@ -174,18 +194,18 @@ def get_ensemble_models():
     # OPT-IN ONLY: Full Multi-Model Ensemble Mode (when LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1)
     print("[ACCURACY ENGINE] Full Multi-Model Ensemble Mode Explicitly Enabled (Opt-in)")
     model_files = {
-        "efficientnetb0": os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5"),
-        "mobilenetv2": os.path.join(SAVED_MODELS_DIR, "mobilenetv2.h5"),
+        "efficientnetb0": _get_existing_model_path("efficientnetb0"),
+        "mobilenetv2": _get_existing_model_path("mobilenetv2"),
     }
 
     if os.environ.get("ENABLE_RESNET50", "0") == "1":
-        model_files["resnet50"] = os.path.join(SAVED_MODELS_DIR, "resnet50.h5")
+        model_files["resnet50"] = _get_existing_model_path("resnet50")
 
     for name, path in model_files.items():
         if os.path.exists(path):
             try:
                 print(f"[ACCURACY ENGINE] Loading model '{name}' from {path}")
-                m = tf.keras.models.load_model(path, compile=False)
+                m = tf.keras.models.load_model(path, compile=False, custom_objects=CUSTOM_OBJECTS)
                 loaded_models[name] = m
                 if _primary_model is None or name == "efficientnetb0":
                     _primary_model = m
@@ -194,7 +214,7 @@ def get_ensemble_models():
 
     if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
         print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}")
-        m = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False)
+        m = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False, custom_objects=CUSTOM_OBJECTS)
         loaded_models["fallback"] = m
         _primary_model = m
 
