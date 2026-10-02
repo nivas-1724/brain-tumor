@@ -2549,3 +2549,23 @@ body {
   justify-content: flex-end;
 }
 
+.btn-xai-trigger {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-xai-trigger:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  transform: translateY(-1px);
+}
+

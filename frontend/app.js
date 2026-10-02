@@ -313,11 +313,15 @@ function initTabNavigation() {
 // ─────────────────────────────────────────────
 // SERVER HEALTH CHECK
 // ─────────────────────────────────────────────
-async function checkServerHealth() {
+async function checkServerHealth(retries = 2) {
   const dot = document.querySelector(".status-dot");
   const text = $("statusText");
   try {
-    const res = await fetch(`${API_BASE}/health`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     if (res.ok) {
       if (dot) dot.classList.add("online");
       if (text) text.textContent = "Server Ready";
@@ -326,8 +330,13 @@ async function checkServerHealth() {
       if (dot) dot.classList.remove("online");
     }
   } catch (err) {
-    if (text) text.textContent = "AI model unavailable";
-    if (dot) dot.classList.remove("online");
+    if (retries > 0) {
+      if (text) text.textContent = "Connecting to server...";
+      setTimeout(() => checkServerHealth(retries - 1), 3000);
+    } else {
+      if (text) text.textContent = "AI model offline";
+      if (dot) dot.classList.remove("online");
+    }
   }
 }
 
@@ -434,19 +443,30 @@ async function runAnalysisWorkflow() {
   formData.append("referring_doctor", $("refDoctor") ? $("refDoctor").value.trim() : "");
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
+
     const res = await fetch(`${API_BASE}/predict`, {
       method: "POST",
       body: formData,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (requestId !== currentRequestId) return;
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      throw new Error(`Server returned HTTP ${res.status} invalid response.`);
+    }
 
     if (requestId !== currentRequestId) return;
 
-    if (!data.success) throw new Error(data.error || "Analysis failed");
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Analysis failed (HTTP ${res.status})`);
+    }
 
     lastResultData = data;
     lastResultData.patient_info = getPatientInfo();
@@ -462,7 +482,8 @@ async function runAnalysisWorkflow() {
   } catch (err) {
     if (requestId !== currentRequestId) return;
     $("loadingOverlay").classList.add("hidden");
-    alert(`Analysis unavailable\n\nUnable to obtain a valid model prediction: ${err.message}`);
+    const errorMsg = err.name === "AbortError" ? "Request timed out after 90s. Please try again." : err.message;
+    alert(`Analysis unavailable\n\nUnable to obtain a valid model prediction: ${errorMsg}`);
   } finally {
     isAnalyzing = false;
     if (selectedFile && $("previewCard") && !$("previewCard").classList.contains("hidden")) {
@@ -586,6 +607,45 @@ function updateModalityCard(data) {
     if (msg) msg.textContent = "Ready for tumor analysis";
     if (analyzeBtn) analyzeBtn.disabled = false;
   }
+async function fetchXAI(method, buttonEl = null) {
+  if (!lastResultData || !lastResultData.analysis_id) return;
+
+  const analysisId = lastResultData.analysis_id;
+  let targetImgId = "resultOverlay";
+  if (method === "ig" || method === "integrated_gradients") targetImgId = "resultIG";
+  if (method === "lime") targetImgId = "resultLIME";
+
+  const targetImg = $(targetImgId);
+  if (buttonEl) buttonEl.disabled = true;
+
+  if (targetImg) {
+    targetImg.style.opacity = "0.4";
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/explain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ analysis_id: analysisId, method: method })
+    });
+    const data = await res.json();
+
+    if (data.success && data.explainability) {
+      const xai = data.explainability;
+      if ((method === "gradcam" || method === "overlay") && (xai.overlay_b64 || xai.gradcam_b64)) {
+        if ($("resultOverlay")) $("resultOverlay").src = xai.overlay_b64 || xai.gradcam_b64;
+      } else if ((method === "ig" || method === "integrated_gradients") && xai.ig_b64) {
+        if ($("resultIG")) $("resultIG").src = xai.ig_b64;
+      } else if (method === "lime" && xai.lime_b64) {
+        if ($("resultLIME")) $("resultLIME").src = xai.lime_b64;
+      }
+    }
+  } catch (err) {
+    console.error(`Error fetching XAI (${method}):`, err);
+  } finally {
+    if (targetImg) targetImg.style.opacity = "1";
+    if (buttonEl) buttonEl.disabled = false;
+  }
 }
 
 function renderResults(data) {
@@ -643,11 +703,15 @@ function renderResults(data) {
   } else {
     if (xaiCard) xaiCard.classList.remove("hidden");
     const origSrc = data.original_b64 || "";
-    const overlaySrc = data.overlay_b64 || origSrc;
     if ($("resultOriginal")) $("resultOriginal").src = origSrc;
-    if ($("resultOverlay")) $("resultOverlay").src = overlaySrc;
-    if ($("resultIG")) $("resultIG").src = data.ig_b64 || overlaySrc;
-    if ($("resultLIME")) $("resultLIME").src = data.lime_b64 || overlaySrc;
+    if ($("resultOverlay")) $("resultOverlay").src = data.overlay_b64 || origSrc;
+    if ($("resultIG")) $("resultIG").src = data.ig_b64 || origSrc;
+    if ($("resultLIME")) $("resultLIME").src = data.lime_b64 || origSrc;
+
+    // Auto-fetch Grad-CAM if not already present in response
+    if (!data.overlay_b64 && data.analysis_id) {
+      fetchXAI("gradcam");
+    }
   }
 
   // Faithfulness Evaluation (Blocked for Rejected Images or Fast Mode)

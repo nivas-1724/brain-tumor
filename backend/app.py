@@ -1,6 +1,7 @@
 """
-Brain Tumor Detection — Research REST API
-Provides endpoints for MRI image classification, Multi-XAI, Calibration, Model Benchmarking, Error Analysis, and CSV Downloads.
+NeuroScan AI — Production REST API Server
+Provides optimized endpoints for MRI image classification, on-demand Explainable AI (Grad-CAM, Integrated Gradients, LIME),
+paginated analysis history, research benchmarking, and CSV downloads.
 """
 
 import os
@@ -8,12 +9,15 @@ import sys
 import json
 import traceback
 import io
+import time
 import numpy as np
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
+
+os.environ["LIGHTWEIGHT_MODE"] = os.environ.get("LIGHTWEIGHT_MODE", "1")
 
 from flask import Flask, request, jsonify, send_file, make_response
 from flask_cors import CORS
@@ -25,7 +29,7 @@ sys.path.insert(0, ROOT_DIR)
 sys.path.insert(0, os.path.join(ROOT_DIR, "model"))
 sys.path.insert(0, BASE_DIR)
 
-from model.predict import predict
+from model.predict import predict, explain_mri, load_production_model, is_lightweight_mode
 from report import generate_report
 from history_db import (
     init_db,
@@ -70,39 +74,17 @@ def decode_image_bytes(file_bytes: bytes, filename: str = "") -> Image.Image:
             else:
                 return Image.fromarray(arr[0]).convert("RGB")
         except Exception as dicom_err:
-            print(f"[IMAGE DECODER] DICOM decode warning: {dicom_err}, trying standard image decode...")
+            print(f"[IMAGE DECODER] DICOM decode warning: {dicom_err}, attempting standard decode...")
 
     return Image.open(io.BytesIO(file_bytes)).convert("RGB")
 
-# Pre-load & warm-up AI models once at application startup for low-RAM efficiency
+# Pre-load EfficientNetB0 production model ONCE at startup
 try:
-    import time
-    import gc
-    t_start_load = time.time()
-    print("[STARTUP] Pre-loading AI models into memory...")
-    from model.mri_validator import load_modality_model
-    from model.predict import get_ensemble_models
-    
-    mod_model = load_modality_model()
-    ens_pred, prim_model = get_ensemble_models()
-    
-    # Warm-up TensorFlow execution graph once at startup
-    dummy_input = np.zeros((1, 224, 224, 3), dtype=np.float32)
-    if mod_model is not None:
-        try:
-            _ = mod_model(dummy_input, training=False)
-        except Exception:
-            pass
-    if prim_model is not None:
-        try:
-            _ = prim_model(dummy_input, training=False)
-        except Exception:
-            pass
-            
-    print(f"[STARTUP] AI models pre-loaded and warmed up in {time.time() - t_start_load:.2f}s successfully.")
-    gc.collect()
-except Exception as _preload_err:
-    print(f"[STARTUP] Model pre-loading warning: {_preload_err}")
+    print("[STARTUP] Pre-loading single EfficientNetB0 production model into memory...")
+    load_production_model()
+    print("[STARTUP] Single EfficientNetB0 model ready for deployment.")
+except Exception as _load_err:
+    print(f"[STARTUP WARNING] Model load warning: {_load_err}")
 
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -128,9 +110,11 @@ def index():
 def health():
     return jsonify({
         "success": True,
-        "status": "running",
-        "title": "Confidence-Calibrated, Robust and Explainable Multi-Model Brain MRI Classification",
-        "version": "2.0.0-research",
+        "status": "ok",
+        "model_loaded": True,
+        "lightweight_mode": is_lightweight_mode(),
+        "title": "NeuroScan AI — Production Optimized Brain MRI Classification",
+        "version": "2.0.0-production",
     })
 
 
@@ -153,8 +137,7 @@ def api_predict():
         return error_response(f"File too large ({size_mb:.1f} MB). Max: {MAX_FILE_SIZE_MB} MB.")
 
     analysis_id = generate_analysis_id()
-    print("\n" + "=" * 65)
-    print(f"[ANALYSIS START] analysis_id={analysis_id}, filename={file.filename}")
+    print(f"\n[REQUEST START] analysis_id={analysis_id}, filename={file.filename}")
 
     patient_info = {
         "analysis_id": analysis_id,
@@ -166,23 +149,20 @@ def api_predict():
         "image_filename": file.filename,
     }
 
-    ext = os.path.splitext(file.filename.lower())[1] or ".png"
-    unique_filename = f"{analysis_id}_original{ext}"
-    saved_upload_path = os.path.join(STORAGE_DIR, unique_filename)
-
     try:
         img_bytes = file.read()
+        ext = os.path.splitext(file.filename.lower())[1] or ".jpg"
+        unique_filename = f"{analysis_id}_original{ext}"
+        saved_upload_path = os.path.join(STORAGE_DIR, unique_filename)
         with open(saved_upload_path, "wb") as f_out:
             f_out.write(img_bytes)
-        print(f"[UPLOAD] analysis_id={analysis_id}, saved_path={saved_upload_path}")
     except Exception as upload_err:
-        print(f"[UPLOAD WARNING] Could not save raw file to storage: {upload_err}")
+        print(f"[UPLOAD WARNING] Storage save failed: {upload_err}")
 
     try:
         pil_img = decode_image_bytes(img_bytes, filename=file.filename)
     except Exception as e:
-        print(f"[DECODE ERROR] analysis_id={analysis_id}, error={e}")
-        return error_response(f"Could not open image: {str(e)}")
+        return error_response(f"Could not open image file: {str(e)}")
 
     try:
         result = predict(
@@ -193,32 +173,57 @@ def api_predict():
             patient_info=patient_info
         )
 
-        # Save history ONLY if valid MRI scan
         if result.get("is_valid_mri", True):
             try:
                 saved_id = save_analysis_record(result, patient_info, analysis_id=analysis_id)
                 result["analysis_id"] = saved_id
                 result["saved_to_history"] = True
-                print(f"[HISTORY] analysis_id={saved_id}, record saved successfully")
             except Exception as hist_err:
-                print(f"[HISTORY ERROR] Failed to save history record for {analysis_id}: {hist_err}")
-                traceback.print_exc()
+                print(f"[HISTORY DB ERROR] {hist_err}")
                 result["saved_to_history"] = False
         else:
-            print(f"[PIPELINE REJECTED] analysis_id={analysis_id}, stage=mri_validation, is_mri=False")
             result["saved_to_history"] = False
 
         result["patient_info"] = patient_info
-        print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}")
-        print("=" * 65 + "\n")
-
-        gc.collect()
         return jsonify({"success": True, **result})
     except FileNotFoundError as e:
         return error_response(str(e), 503)
     except Exception as e:
-        traceback.print_exc()
+        print(f"[PREDICTION ERROR] {e}")
         return error_response(f"Prediction failed: {str(e)}", 500)
+
+
+@app.route("/api/explain", methods=["POST"])
+def api_explain():
+    """
+    On-Demand Explainable AI Generator Endpoint:
+    Generates Grad-CAM, Integrated Gradients, or LIME using the loaded EfficientNetB0 singleton model.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    analysis_id = data.get("analysis_id")
+    method = data.get("method", "gradcam").lower().strip()
+
+    if not analysis_id:
+        return error_response("Missing 'analysis_id' in request body.")
+
+    # Find saved original image for this analysis_id in STORAGE_DIR
+    orig_path = None
+    if os.path.exists(STORAGE_DIR):
+        for fname in os.listdir(STORAGE_DIR):
+            if fname.startswith(f"{analysis_id}_") and ("orig" in fname or "original" in fname):
+                orig_path = os.path.join(STORAGE_DIR, fname)
+                break
+
+    if not orig_path or not os.path.exists(orig_path):
+        return error_response(f"Original image for analysis '{analysis_id}' not found.", 404)
+
+    try:
+        pil_img = Image.open(orig_path).convert("RGB")
+        xai_res = explain_mri(analysis_id, method=method, pil_img=pil_img)
+        return jsonify({"success": True, "analysis_id": analysis_id, "explainability": xai_res})
+    except Exception as e:
+        print(f"[EXPLAIN API ERROR] {e}")
+        return error_response(f"Explainability generation failed: {str(e)}", 500)
 
 
 # ─────────────────────────────────────────────
@@ -230,18 +235,29 @@ def get_history_api():
     prediction = request.args.get("prediction", "all")
     date_filter = request.args.get("date", "all")
     sort = request.args.get("sort", "newest")
+    page = request.args.get("page", 1)
+    limit = request.args.get("limit", 20)
 
     try:
-        records = get_all_history(
+        hist_data = get_all_history(
             search=search,
             prediction_filter=prediction,
             date_filter=date_filter,
-            sort_order=sort
+            sort_order=sort,
+            page=page,
+            limit=limit
         )
         stats = get_history_stats()
-        return jsonify({"success": True, "history": records, "stats": stats})
+        return jsonify({
+            "success": True,
+            "history": hist_data["records"],
+            "total": hist_data["total"],
+            "page": hist_data["page"],
+            "limit": hist_data["limit"],
+            "stats": stats
+        })
     except Exception as e:
-        traceback.print_exc()
+        print(f"[HISTORY API ERROR] {e}")
         return jsonify({"success": False, "error": f"Failed to fetch history: {str(e)}"}), 500
 
 
@@ -256,7 +272,6 @@ def get_history_detail_api(analysis_id):
             return jsonify({"success": False, "error": f"Analysis record '{analysis_id}' not found."}), 404
         return jsonify({"success": True, "detail": detail})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"success": False, "error": f"Failed to fetch record: {str(e)}"}), 500
 
 
@@ -272,7 +287,6 @@ def delete_history_api(analysis_id):
         stats = get_history_stats()
         return jsonify({"success": True, "message": f"Deleted {analysis_id}", "stats": stats})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"success": False, "error": f"Failed to delete record: {str(e)}"}), 500
 
 
@@ -283,7 +297,6 @@ def clear_history_api():
         stats = get_history_stats()
         return jsonify({"success": True, "message": f"Cleared all history ({cleared_count} records).", "stats": stats})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"success": False, "error": f"Failed to clear history: {str(e)}"}), 500
 
 
@@ -316,7 +329,6 @@ def api_report():
     try:
         pdf_bytes = generate_report(prediction_data, patient_info)
     except Exception as e:
-        traceback.print_exc()
         return error_response(f"Report generation failed: {str(e)}", 500)
 
     response = make_response(pdf_bytes)
@@ -336,7 +348,6 @@ def get_model_comparison():
             data = json.load(f)
         return jsonify({"success": True, "comparison": data})
     
-    # Run dynamic evaluation if json not created yet
     try:
         from experiments.evaluate_models import run_evaluation_experiment
         data, _ = run_evaluation_experiment()
@@ -467,8 +478,8 @@ def api_samples():
 
 if __name__ == "__main__":
     print("=" * 65)
-    print(" 🧠 NeuroScan AI — Research Platform Server")
-    print("    Framework: Confidence-Calibrated, Robust and Explainable Multi-Model Brain MRI Classification")
+    print(" 🧠 NeuroScan AI — Production Platform Server")
+    print("    Model: EfficientNetB0 (Production Optimized)")
     print("=" * 65)
     print(" URL  : http://localhost:5000")
     print(" API  : http://localhost:5000/api/predict")

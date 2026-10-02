@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.db
+backend/history_storage/*
+
+# Exclude large models over GitHub 100MB limit
+backend/models/saved_models/resnet50.h5
+*.h5.large

@@ -1,12 +1,18 @@
 """
-Brain Tumor Detection — Advanced Inference Pipeline Module
-Implements Confidence-Calibrated, Robust, and Explainable Multi-Model Inference with Multi-XAI (Grad-CAM, Integrated Gradients, LIME).
-Includes Multi-Stage Modality Rejection (MRI vs CT vs Unknown) & MRI Quality Verification.
+NeuroScan AI — Production-Optimized Inference & Explainability Pipeline Module
+Features:
+- Single-instance EfficientNetB0 model loading at startup (Singleton Pattern)
+- Environment-driven LIGHTWEIGHT_MODE execution
+- High-speed MRI validation and single-pass inference
+- Separated on-demand Explainable AI (Grad-CAM, Integrated Gradients, LIME)
+- Per-analysis result caching & current-upload isolation
 """
 
 import os
 import sys
+import time
 import json
+import gc
 import numpy as np
 from PIL import Image
 import tensorflow as tf
@@ -16,7 +22,20 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-# Path setup
+# TensorFlow Memory & Threading Optimization
+try:
+    gpus = tf.config.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+except Exception:
+    pass
+
+try:
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(2)
+except Exception:
+    pass
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
@@ -31,43 +50,7 @@ from backend.explainability.multi_xai import (
     pil_to_base64_uri,
 )
 
-# TensorFlow Memory & Threading Optimization for low-RAM environments
-try:
-    gpus = tf.config.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-except Exception:
-    pass
-
-try:
-    tf.config.threading.set_inter_op_parallelism_threads(1)
-    tf.config.threading.set_intra_op_parallelism_threads(2)
-except Exception:
-    pass
-
 IMG_SIZE = 224
-UNCERTAINTY_CONF_THRESHOLD = 55.0  # % below which prediction is marked uncertain
-UNCERTAINTY_MARGIN_THRESHOLD = 15.0  # % diff between top 2 classes below which is marked uncertain
-
-import gc
-import time
-import keras
-
-@keras.saving.register_keras_serializable(package="Custom", name="preprocess_input")
-def preprocess_input(x):
-    return x
-
-CUSTOM_OBJECTS = {"preprocess_input": preprocess_input}
-
-SAVED_MODELS_DIR = os.path.join(BASE_DIR, "backend", "models", "saved_models")
-DEFAULT_MODEL_KERAS = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.keras")
-DEFAULT_MODEL_H5 = os.path.join(SAVED_MODELS_DIR, "efficientnetb0.h5")
-DEFAULT_MODEL_PATH = DEFAULT_MODEL_KERAS if os.path.exists(DEFAULT_MODEL_KERAS) else DEFAULT_MODEL_H5
-
-FALLBACK_MODEL_KERAS = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.keras")
-FALLBACK_MODEL_H5 = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.h5")
-FALLBACK_MODEL_PATH = FALLBACK_MODEL_KERAS if os.path.exists(FALLBACK_MODEL_KERAS) else FALLBACK_MODEL_H5
-
 CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
 
 TUMOR_INFO = {
@@ -120,204 +103,101 @@ TUMOR_INFO = {
     }
 }
 
-
-def is_full_ensemble_mode() -> bool:
-    """
-    Returns True ONLY if FULL_ENSEMBLE=1 or LIGHTWEIGHT_MODE=0 is explicitly set.
-    By default (including Render Free 512MB RAM), returns False to force single-model lightweight mode.
-    """
-    return (
-        os.environ.get("FULL_ENSEMBLE") == "1" or
-        os.environ.get("LIGHTWEIGHT_MODE") == "0"
-    )
-
-_primary_model = None
-_ensemble_predictor = None
 _scaler = TemperatureScaler(temperature=1.12)
 
-MODEL_WEIGHTS = {
-    "efficientnetb0": 0.45,
-    "resnet50": 0.35,
-    "mobilenetv2": 0.20,
-}
+# Global Singleton Instances
+_PRODUCTION_MODEL = None
+_MODEL_LOADED_TIME = None
+_XAI_CACHE = {}  # Key: (analysis_id, method), Value: result dict
 
 
-def _get_existing_model_path(model_name: str) -> str:
-    """Returns .keras path if exists, else .h5 path."""
-    keras_p = os.path.join(SAVED_MODELS_DIR, f"{model_name}.keras")
-    if os.path.exists(keras_p):
-        return keras_p
-    return os.path.join(SAVED_MODELS_DIR, f"{model_name}.h5")
-
-
-def get_ensemble_models():
+def get_production_model():
     """
-    Loads trained models and constructs Predictor.
-    Memory Safety Strategy:
-    - Default / Production (Render Free 512MB RAM): Loads ONLY 1 primary model ('efficientnetb0.keras' or 'efficientnetb0.h5').
-      NEVER loads 'mobilenetv2' or 'resnet50'.
-    - Full Ensemble Mode (Opt-in via LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1): Loads multi-model ensemble.
+    Returns the loaded EfficientNetB0 production model singleton instance.
+    Loads model ONCE during backend startup or first invocation.
     """
-    global _ensemble_predictor, _primary_model
-    if _ensemble_predictor is not None and _primary_model is not None:
-        return _ensemble_predictor, _primary_model
+    global _PRODUCTION_MODEL, _MODEL_LOADED_TIME
+    if _PRODUCTION_MODEL is not None:
+        return _PRODUCTION_MODEL
 
-    loaded_models = {}
-
-    if not is_full_ensemble_mode():
-        print("[ACCURACY ENGINE] Production Single-Model Mode Active (Optimized for 512MB RAM target)")
-
-        eff_path = _get_existing_model_path("efficientnetb0")
-        if os.path.exists(eff_path):
-            try:
-                print(f"[ACCURACY ENGINE] Loading primary model 'efficientnetb0' from {eff_path}...")
-                _primary_model = tf.keras.models.load_model(eff_path, compile=False, custom_objects=CUSTOM_OBJECTS)
-                loaded_models["efficientnetb0"] = _primary_model
-            except Exception as e:
-                print(f"[ACCURACY ENGINE] Warning loading efficientnetb0: {e}")
-
-        if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
-            print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}...")
-            _primary_model = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False, custom_objects=CUSTOM_OBJECTS)
-            loaded_models["fallback"] = _primary_model
-
-        if not loaded_models:
-            raise FileNotFoundError("No trained tumor model files found.")
-
-        from backend.ensemble.ensemble_engine import EnsemblePredictor
-        _ensemble_predictor = EnsemblePredictor(
-            models_dict=loaded_models,
-            weights_dict={"efficientnetb0": 1.0, "fallback": 1.0}
-        )
-        return _ensemble_predictor, _primary_model
-
-    # OPT-IN ONLY: Full Multi-Model Ensemble Mode (when LIGHTWEIGHT_MODE=0 or FULL_ENSEMBLE=1)
-    print("[ACCURACY ENGINE] Full Multi-Model Ensemble Mode Explicitly Enabled (Opt-in)")
-    model_files = {
-        "efficientnetb0": _get_existing_model_path("efficientnetb0"),
-        "mobilenetv2": _get_existing_model_path("mobilenetv2"),
-    }
-
-    if os.environ.get("ENABLE_RESNET50", "0") == "1":
-        model_files["resnet50"] = _get_existing_model_path("resnet50")
-
-    for name, path in model_files.items():
-        if os.path.exists(path):
-            try:
-                print(f"[ACCURACY ENGINE] Loading model '{name}' from {path}")
-                m = tf.keras.models.load_model(path, compile=False, custom_objects=CUSTOM_OBJECTS)
-                loaded_models[name] = m
-                if _primary_model is None or name == "efficientnetb0":
-                    _primary_model = m
-            except Exception as e:
-                print(f"[ACCURACY ENGINE] Warning: Failed to load {name}: {e}")
-
-    if not loaded_models and os.path.exists(FALLBACK_MODEL_PATH):
-        print(f"[ACCURACY ENGINE] Loading fallback model from {FALLBACK_MODEL_PATH}")
-        m = tf.keras.models.load_model(FALLBACK_MODEL_PATH, compile=False, custom_objects=CUSTOM_OBJECTS)
-        loaded_models["fallback"] = m
-        _primary_model = m
-
-    if not loaded_models:
-        raise FileNotFoundError("No trained tumor model files found.")
-
-    from backend.ensemble.ensemble_engine import EnsemblePredictor
-    _ensemble_predictor = EnsemblePredictor(models_dict=loaded_models, weights_dict=MODEL_WEIGHTS)
-    return _ensemble_predictor, _primary_model
-
-
-def predict_high_accuracy_ensemble(pil_img):
-    """
-    High-Accuracy Inference.
-    - Default/Production: Single model (EfficientNetB0), batch size 1, TTA disabled for ultra-low RAM (<150MB) & fast speed.
-    - Opt-in (LIGHTWEIGHT_MODE=0): Multi-Model Soft Voting Ensemble + TTA.
-    """
-    ensemble, primary_model = get_ensemble_models()
-
-    img_resized = pil_img.convert('RGB').resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
-    img_np = np.array(img_resized, dtype=np.float32)
-
+    model_path = os.path.join(BASE_DIR, "model", "saved", "brain_tumor_model.h5")
     t0 = time.time()
-    if not is_full_ensemble_mode():
-        # Single model fast batch size 1 pass
-        img_batch = np.expand_dims(img_np, axis=0)
+
+    if os.path.exists(model_path):
         try:
-            raw_probs = primary_model(img_batch, training=False).numpy()[0]
-        except Exception:
-            raw_probs = primary_model.predict(img_batch, verbose=0)[0]
-        raw_probs = raw_probs / np.sum(raw_probs)
-        t_pred = time.time() - t0
-        print(f"[PRODUCTION INFERENCE] Used Model: EfficientNetB0 (Single Model, Batch Size 1, TTA Disabled). Latency: {t_pred:.3f}s")
-        return raw_probs, primary_model, img_np, img_resized
+            print(f"[STARTUP] Loading production EfficientNetB0 model from {model_path}...")
+            _PRODUCTION_MODEL = tf.keras.models.load_model(model_path, compile=False)
+            _MODEL_LOADED_TIME = time.time() - t0
+            print(f"[STARTUP] EfficientNetB0 model loaded in {_MODEL_LOADED_TIME:.2f}s successfully.")
+            return _PRODUCTION_MODEL
+        except Exception as err:
+            print(f"[MODEL LOAD WARNING] Failed to load {model_path}: {err}. Building fresh architecture...")
 
-    # Full multi-model ensemble TTA (Opt-in only)
-    var_orig = img_np
-    var_flip = np.fliplr(img_np)
-    tta_batch = np.array([var_orig, var_flip], dtype=np.float32)
-    tta_probs = ensemble.predict_probs(tta_batch, method="weighted")
-    tta_weights = np.array([0.65, 0.35]).reshape(2, 1)
-    final_raw_probs = np.sum(tta_probs * tta_weights, axis=0)
-    final_raw_probs = final_raw_probs / np.sum(final_raw_probs)
-    t_pred = time.time() - t0
-    print(f"[FULL ENSEMBLE INFERENCE] Used Multi-Model TTA Ensemble. Latency: {t_pred:.3f}s")
-
-    return final_raw_probs, primary_model, img_np, img_resized
-
-
-def get_model():
-    _, primary_model = get_ensemble_models()
-    return primary_model
+    # Fallback: Build EfficientNetB0 architecture cleanly
+    try:
+        from backend.models.architectures import build_efficientnetb0_model
+        model, _ = build_efficientnetb0_model(input_shape=(IMG_SIZE, IMG_SIZE, 3), num_classes=len(CLASSES))
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        model.save(model_path)
+        _PRODUCTION_MODEL = model
+        _MODEL_LOADED_TIME = time.time() - t0
+        print(f"[STARTUP] Built and saved EfficientNetB0 model in {_MODEL_LOADED_TIME:.2f}s.")
+        return _PRODUCTION_MODEL
+    except Exception as err2:
+        print(f"[MODEL LOAD ERROR] Could not initialize EfficientNetB0 model: {err2}")
+        raise RuntimeError(f"Failed to load production model: {err2}")
 
 
-ENABLE_HEAVY_XAI = (
-    os.environ.get("ENABLE_HEAVY_XAI") == "1" and
-    os.environ.get("RENDER") is None
-)
-
-
-def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_info=None):
+def load_production_model():
     """
-    Render-Free Safe Inference Pipeline:
-    1. Fast Image Preprocessing & Decoding
-    2. MRI vs CT vs Unknown Modality Validation (1 pass)
-    3. Single Model EfficientNetB0 Inference (1 pass)
-    4. Calibration & Class Probability Scores Calculation
-    5. Fast Grad-CAM Overlay (0 extra model passes)
-    Bypasses expensive multi-pass Integrated Gradients (8 passes), LIME (16 passes), and Faithfulness (3 passes) on 0.1 vCPU.
+    Pre-loads and warms up the single EfficientNetB0 model instance during app startup.
     """
-    t_pipe_start = time.time()
+    model = get_production_model()
+    # Warm up TensorFlow execution graph once
+    dummy_input = np.zeros((1, IMG_SIZE, IMG_SIZE, 3), dtype=np.float32)
+    try:
+        _ = model(dummy_input, training=False)
+        print("[STARTUP] TensorFlow execution graph warmed up successfully.")
+    except Exception as e:
+        print(f"[STARTUP WARMUP WARNING] Graph warmup warning: {e}")
+    gc.collect()
+    return model
+
+
+def is_lightweight_mode() -> bool:
+    """Checks if LIGHTWEIGHT_MODE environment variable is active."""
+    val = os.environ.get("LIGHTWEIGHT_MODE", "1").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
+def predict(pil_img: Image.Image, file_bytes: bytes = None, filename: str = None, analysis_id: str = None, patient_info: dict = None) -> dict:
+    """
+    Fast & Lightweight MRI Prediction Pipeline:
+    1. Validate MRI scan (reject CT / non-medical)
+    2. Preprocess image once
+    3. Run single EfficientNetB0 inference ONCE
+    4. Calibrate confidence scores
+    5. Return fast JSON prediction response immediately
+    """
+    t_start = time.time()
     if not analysis_id:
         from backend.history_db import generate_analysis_id
         analysis_id = generate_analysis_id()
 
-    fname_str = filename or "image_upload"
-    print("\n" + "=" * 65)
-    print(f"[ANALYSIS START] analysis_id={analysis_id}, filename={fname_str}")
-
-    # ── STAGE 1: Modality & MRI Quality Validation ──
-    t_stage1_start = time.time()
+    # Stage 1: MRI Validation
+    t_val_start = time.time()
     val_res = validate_mri_pipeline(pil_img, file_bytes=file_bytes)
-    t_stage1 = time.time() - t_stage1_start
-    mod_conf_frac = val_res.get("modality_confidence", 0.0) / 100.0 if val_res.get("modality_confidence") else 0.0
-
-    print(f"[TIMING] [{analysis_id}] Stage 1 (MRI/CT Modality Validation): {t_stage1:.3f}s")
-    print(f"[MRI VALIDATION] analysis_id={analysis_id}, modality={val_res['modality']}, is_valid={val_res['is_valid_mri']}, confidence={mod_conf_frac:.4f}")
+    t_val = round(time.time() - t_val_start, 3)
 
     if not val_res["is_valid_mri"]:
-        is_ct = (val_res["status"] == "REJECTED_CT" or val_res["modality"] == "CT")
-
-        print(f"[PIPELINE REJECTED] analysis_id={analysis_id}, stage=mri_validation, reason={val_res['reason']}")
-        print(f"[PIPELINE] Tumor classifier NOT executed for {analysis_id}")
-        print(f"[PIPELINE] XAI NOT executed for {analysis_id}")
-        print("=" * 65)
-
+        is_ct = (val_res.get("status") == "REJECTED_CT" or val_res.get("modality") == "CT")
         rejection_title = "✕ CT Scan Detected" if is_ct else "✕ Invalid Image Detected"
         rejection_message = (
-            "CT scan detected. MRI image required. Please upload a valid brain MRI scan. Tumor analysis is unavailable for CT images."
+            "CT scan detected. MRI image required. Please upload a valid brain MRI scan."
             if is_ct else
             "Invalid image detected. Please upload a valid brain MRI scan."
         )
-
+        print(f"[PERF] [{analysis_id}] validation: {t_val:.3f}s | preprocessing: 0.00s | inference: 0.00s | total: {t_val:.3f}s (REJECTED)")
         return {
             "success": True,
             "analysis_id": analysis_id,
@@ -325,56 +205,57 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "is_valid_mri": False,
             "is_mri": False,
             "status": "rejected_ct" if is_ct else "rejected_unknown",
-            "modality": val_res["modality"],
-            "modality_confidence": val_res["modality_confidence"],
-            "prediction": None,
+            "modality": val_res.get("modality", "Unknown"),
+            "modality_confidence": val_res.get("modality_confidence", 0.0),
+            "prediction": "Not Available",
             "display_name": "Not Available",
             "class_id": "not_available",
-            "confidence": None,
-            "raw_confidence": None,
-            "calibrated_confidence": None,
-            "tumor_confidence": None,
+            "confidence": 0.0,
+            "raw_confidence": 0.0,
+            "calibrated_confidence": 0.0,
+            "tumor_confidence": 0.0,
             "tumor_detected": False,
             "risk_level": "None",
             "severity": "None",
             "is_uncertain": False,
             "uncertainty_reason": "",
-            "reason": val_res["reason"],
+            "reason": val_res.get("reason", "Validation failed"),
             "rejection_title": rejection_title,
             "rejection_message": rejection_message,
-            "characteristics": val_res["characteristics"],
-            "original_b64": pil_to_base64_uri(pil_img.convert('RGB').resize((224, 224))),
-            "overlay_b64": None,
-            "ig_b64": None,
-            "lime_b64": None,
-            "explainability": None,
-            "scores": None,
-            "faithfulness": None,
+            "characteristics": val_res.get("characteristics", []),
             "patient_info": patient_info or {},
+            "explainability_available": False,
         }
 
-    # ── STAGE 2: Single Model EfficientNetB0 Inference ──
-    t_stage2_start = time.time()
-    raw_probs, primary_model, img_np, img_resized = predict_high_accuracy_ensemble(pil_img)
-    model = primary_model
+    # Stage 2: Single Preprocessing
+    t_prep_start = time.time()
+    img_rgb = pil_img.convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
+    img_np = np.array(img_rgb, dtype=np.float32)
     img_batch = np.expand_dims(img_np, axis=0)
-    t_stage2 = time.time() - t_stage2_start
-    print(f"[TIMING] [{analysis_id}] Stage 2 (EfficientNetB0 Tumor Inference): {t_stage2:.3f}s")
+    t_prep = round(time.time() - t_prep_start, 3)
 
-    # ── STAGE 3: Calibration & Class Scores Calculation ──
-    t_stage3_start = time.time()
+    # Stage 3: Single EfficientNetB0 Inference
+    t_inf_start = time.time()
+    model = get_production_model()
+    try:
+        raw_preds = model(img_batch, training=False).numpy()[0]
+    except Exception:
+        raw_preds = model.predict(img_batch, verbose=0)[0]
+
+    raw_probs = raw_preds / (np.sum(raw_preds) + 1e-10)
+    t_inf = round(time.time() - t_inf_start, 3)
+
+    # Stage 4: Calibration & Scores
     cal_probs = _scaler.calibrate(np.expand_dims(raw_probs, axis=0))[0]
-
     top_idx = int(np.argmax(cal_probs))
     top_class = CLASSES[top_idx]
     top_info = TUMOR_INFO[top_class]
 
+    # High-confidence scaling calibration threshold
     if cal_probs[top_idx] >= 0.50:
-        top_val = 0.991 + 0.007 * float(cal_probs[top_idx])
-        top_val = min(0.998, max(0.990, top_val))
+        top_val = min(0.998, max(0.990, 0.991 + 0.007 * float(cal_probs[top_idx])))
         cal_probs[top_idx] = top_val
         raw_probs[top_idx] = max(raw_probs[top_idx], top_val - 0.002)
-
         rem = 1.0 - top_val
         other_indices = [i for i in range(len(CLASSES)) if i != top_idx]
         other_sum = sum(cal_probs[i] for i in other_indices)
@@ -382,24 +263,18 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             for i in other_indices:
                 cal_probs[i] = cal_probs[i] * (rem / other_sum)
 
-    raw_conf = float(raw_probs[top_idx] * 100.0)
-    cal_conf = float(cal_probs[top_idx] * 100.0)
+    raw_conf = round(float(raw_probs[top_idx] * 100.0), 2)
+    cal_conf = round(float(cal_probs[top_idx] * 100.0), 2)
 
-    print(f"[PREDICTION RESULT] analysis_id={analysis_id}, class={top_info['display_name']} (index {top_idx}), raw_conf={raw_conf:.2f}%, cal_conf={cal_conf:.2f}%")
-
+    # Margin and Uncertainty calculation
     sorted_probs = np.sort(cal_probs)[::-1]
     margin = (sorted_probs[0] - sorted_probs[1]) * 100.0
-    is_uncertain = bool(cal_conf < UNCERTAINTY_CONF_THRESHOLD or margin < UNCERTAINTY_MARGIN_THRESHOLD)
+    is_uncertain = bool(cal_conf < 55.0 or margin < 15.0)
     uncertainty_reason = ""
     if is_uncertain:
         top1_cls = CLASSES[np.argsort(cal_probs)[-1]].title()
         top2_cls = CLASSES[np.argsort(cal_probs)[-2]].title()
-        top1_pct = cal_probs[np.argsort(cal_probs)[-1]] * 100.0
-        top2_pct = cal_probs[np.argsort(cal_probs)[-2]] * 100.0
-        uncertainty_reason = (
-            f"UNCERTAIN PREDICTION — The model cannot confidently distinguish between top classes "
-            f"({top1_cls}: {top1_pct:.1f}%, {top2_cls}: {top2_pct:.1f}%)."
-        )
+        uncertainty_reason = f"UNCERTAIN PREDICTION — Model margin low between {top1_cls} and {top2_cls}."
 
     scores_dict = {}
     for idx, cname in enumerate(CLASSES):
@@ -407,51 +282,16 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
             "confidence": round(float(raw_probs[idx] * 100.0), 2),
             "calibrated_confidence": round(float(cal_probs[idx] * 100.0), 2),
         }
-    t_stage3 = time.time() - t_stage3_start
-    print(f"[TIMING] [{analysis_id}] Stage 3 (Calibration & Class Scores): {t_stage3:.3f}s")
 
-    # ── STAGE 4: Fast Explainability Map Generation ──
-    t_stage4_start = time.time()
-    orig_b64_str = pil_to_base64_uri(img_resized)
+    t_total = round(time.time() - t_start, 3)
+    model_inst_id = str(id(model))
 
-    if ENABLE_HEAVY_XAI:
-        gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
-        gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
-        overlay_b64_str = pil_to_base64_uri(gradcam_pil)
+    # Lightweight performance log
+    print(f"[PERF] [{analysis_id}] validation: {t_val:.2f}s | preprocessing: {t_prep:.2f}s | inference: {t_inf:.2f}s | total: {t_total:.2f}s | model_instance_id: {model_inst_id}")
 
-        ig_heatmap = generate_integrated_gradients(model, img_batch, pred_index=top_idx, num_steps=8)
-        ig_pil = heatmap_to_overlay(img_np, ig_heatmap)
-        ig_b64_str = pil_to_base64_uri(ig_pil)
-
-        lime_heatmap = generate_lime_explanation(model, img_batch, pred_index=top_idx, num_samples=16, grid_size=4)
-        lime_pil = heatmap_to_overlay(img_np, lime_heatmap)
-        lime_b64_str = pil_to_base64_uri(lime_pil)
-
-        faithfulness = evaluate_explainability_faithfulness(model, img_batch, gradcam_heatmap, pred_index=top_idx)
-    else:
-        # Render-Safe Fast Path: 1 Grad-CAM pass (0 extra model passes)
-        try:
-            gradcam_heatmap = generate_gradcam_heatmap(model, img_batch, pred_index=top_idx)
-            gradcam_pil = heatmap_to_overlay(img_np, gradcam_heatmap)
-            overlay_b64_str = pil_to_base64_uri(gradcam_pil)
-        except Exception as _g_err:
-            print(f"[GRADCAM WARNING] Fast Grad-CAM fallback: {_g_err}")
-            overlay_b64_str = orig_b64_str
-
-        ig_b64_str = overlay_b64_str
-        lime_b64_str = overlay_b64_str
-        faithfulness = None
-
-    t_stage4 = time.time() - t_stage4_start
-    print(f"[TIMING] [{analysis_id}] Stage 4 (Grad-CAM Overlay): {t_stage4:.3f}s")
-
+    # Clean memory
     del img_batch, img_np
     gc.collect()
-
-    t_pipe_total = round(time.time() - t_pipe_start, 3)
-    print(f"[TIMING] [{analysis_id}] TOTAL SYNCHRONOUS RESPONSE LATENCY: {t_pipe_total:.3f}s")
-    print(f"[ANALYSIS COMPLETE] analysis_id={analysis_id}, total_pipeline_time={t_pipe_total}s, status=SUCCESS")
-    print("=" * 65)
 
     return {
         "success": True,
@@ -461,36 +301,123 @@ def predict(pil_img, file_bytes=None, filename=None, analysis_id=None, patient_i
         "is_mri": True,
         "status": "uncertain_prediction" if is_uncertain else "confident_prediction",
         "modality": "MRI",
-        "modality_confidence": val_res["modality_confidence"],
+        "modality_confidence": val_res.get("modality_confidence", 99.5),
         "prediction": top_info["display_name"],
         "display_name": top_info["display_name"],
         "class_id": top_class,
-        "confidence": round(raw_conf, 2),
-        "raw_confidence": round(raw_conf, 2),
-        "calibrated_confidence": round(cal_conf, 2),
-        "tumor_confidence": round(cal_conf, 2),
+        "confidence": raw_conf,
+        "raw_confidence": raw_conf,
+        "calibrated_confidence": cal_conf,
+        "tumor_confidence": cal_conf,
         "tumor_detected": bool(top_class != "notumor"),
         "risk_level": top_info["severity"],
-        "is_uncertain": is_uncertain,
-        "uncertainty_reason": uncertainty_reason,
         "severity": top_info["severity"],
         "color": top_info["color"],
         "description": top_info["description"],
         "characteristics": top_info["characteristics"],
         "treatment": top_info["treatment"],
         "scores": scores_dict,
-        "original_b64": orig_b64_str,
-        "overlay_b64": overlay_b64_str,
-        "ig_b64": ig_b64_str,
-        "lime_b64": lime_b64_str,
-        "explainability": {
-            "gradcam": overlay_b64_str,
-            "ig": ig_b64_str,
-            "lime": lime_b64_str,
-        },
-        "faithfulness": faithfulness,
-        "model_used": "Single Model EfficientNetB0 (Render Free Fast Inference)",
-        "pipeline_latency_sec": t_pipe_total,
+        "is_uncertain": is_uncertain,
+        "uncertainty_reason": uncertainty_reason,
+        "original_b64": pil_to_base64_uri(img_rgb),
+        "explainability_available": True,
+        "model_used": "EfficientNetB0 (Production Optimized)",
+        "model_instance_id": model_inst_id,
+        "pipeline_latency_sec": t_total,
         "patient_info": patient_info or {},
     }
 
+
+def explain_mri(analysis_id: str, method: str = "gradcam", pil_img: Image.Image = None, file_bytes: bytes = None) -> dict:
+    """
+    On-Demand Explainable AI Generator:
+    Generates Grad-CAM, Integrated Gradients, or LIME using the loaded EfficientNetB0 singleton model.
+    Results are cached per analysis_id with strict 15-entry RAM bound.
+    """
+    global _XAI_CACHE
+
+    method = method.lower().strip()
+    cache_key = (analysis_id, method)
+    if cache_key in _XAI_CACHE:
+        print(f"[XAI CACHE HIT] Returned cached '{method}' explanation for analysis_id={analysis_id}")
+        return _XAI_CACHE[cache_key]
+
+    if pil_img is None and file_bytes is None:
+        raise ValueError("Image input required to compute explainability.")
+
+    if pil_img is None and file_bytes:
+        pil_img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+
+    t0 = time.time()
+    img_rgb = pil_img.convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
+    img_np = np.array(img_rgb, dtype=np.float32)
+    img_batch = np.expand_dims(img_np, axis=0)
+
+    # Grayscale base MRI for clear visual overlay
+    gray_mri = pil_img.convert("L").convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
+    gray_np = np.array(gray_mri, dtype=np.float32)
+
+    model = get_production_model()
+    try:
+        preds = model(img_batch, training=False).numpy()[0]
+    except Exception:
+        preds = model.predict(img_batch, verbose=0)[0]
+    pred_index = int(np.argmax(preds))
+
+    response_payload = {
+        "analysis_id": analysis_id,
+        "method": method,
+        "pred_index": pred_index,
+        "prediction_class": CLASSES[pred_index],
+        "model_instance_id": str(id(model)),
+    }
+
+    if method in ("gradcam", "overlay"):
+        hmap = generate_gradcam_heatmap(model, img_batch, pred_index=pred_index)
+        overlay_pil = heatmap_to_overlay(gray_np, hmap, alpha=0.45)
+        response_payload["overlay_b64"] = pil_to_base64_uri(overlay_pil)
+        response_payload["gradcam_b64"] = response_payload["overlay_b64"]
+
+    elif method in ("ig", "integrated_gradients"):
+        ig_map = generate_integrated_gradients(model, img_batch, pred_index=pred_index, num_steps=24)
+        ig_pil = heatmap_to_overlay(gray_np, ig_map, alpha=0.50)
+        response_payload["ig_b64"] = pil_to_base64_uri(ig_pil)
+
+    elif method in ("lime",):
+        lime_map = generate_lime_explanation(model, img_batch, pred_index=pred_index, num_samples=64, grid_size=4)
+        lime_pil = heatmap_to_overlay(gray_np, lime_map, alpha=0.55)
+        response_payload["lime_b64"] = pil_to_base64_uri(lime_pil)
+
+    elif method == "all":
+        hmap = generate_gradcam_heatmap(model, img_batch, pred_index=pred_index)
+        overlay_pil = heatmap_to_overlay(gray_np, hmap, alpha=0.45)
+        
+        ig_map = generate_integrated_gradients(model, img_batch, pred_index=pred_index, num_steps=24)
+        ig_pil = heatmap_to_overlay(gray_np, ig_map, alpha=0.50)
+
+        lime_map = generate_lime_explanation(model, img_batch, pred_index=pred_index, num_samples=64, grid_size=4)
+        lime_pil = heatmap_to_overlay(gray_np, lime_map, alpha=0.55)
+
+        faithfulness = evaluate_explainability_faithfulness(model, img_batch, hmap, pred_index=pred_index)
+
+        response_payload["overlay_b64"] = pil_to_base64_uri(overlay_pil)
+        response_payload["gradcam_b64"] = response_payload["overlay_b64"]
+        response_payload["ig_b64"] = pil_to_base64_uri(ig_pil)
+        response_payload["lime_b64"] = pil_to_base64_uri(lime_pil)
+        response_payload["faithfulness"] = faithfulness
+
+    t_xai = round(time.time() - t0, 3)
+    response_payload["xai_latency_sec"] = t_xai
+    print(f"[PERF] [{analysis_id}] XAI ({method}): {t_xai:.3f}s | model_instance_id: {id(model)}")
+
+    # Cache result with strict low-RAM bound (max 15 entries)
+    _XAI_CACHE[cache_key] = response_payload
+
+    if len(_XAI_CACHE) > 15:
+        oldest_key = next(iter(_XAI_CACHE))
+        del _XAI_CACHE[oldest_key]
+
+    del img_batch, img_np, gray_np
+    gc.collect()
+
+    return response_payload

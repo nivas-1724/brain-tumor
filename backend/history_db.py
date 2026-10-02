@@ -68,10 +68,10 @@ def init_db():
 
 
 def generate_analysis_id() -> str:
-    """Generates unique Analysis ID: ANL-YYYYMMDD-XXXXXXXX"""
+    """Generates unique Analysis ID: ANA-YYYYMMDD-XXXXXXXX"""
     date_str = datetime.now().strftime("%Y%m%d")
     unique_suffix = uuid.uuid4().hex[:8].upper()
-    return f"ANL-{date_str}-{unique_suffix}"
+    return f"ANA-{date_str}-{unique_suffix}"
 
 
 def _save_b64_image(b64_str: str, filename: str) -> str:
@@ -113,7 +113,7 @@ def save_analysis_record(result_data: dict, patient_info: dict, analysis_id: str
     ref_doctor = patient_info.get("referring_doctor") or "Dr. Nivas"
     orig_filename = patient_info.get("image_filename") or "scan.jpg"
 
-    # Save images to storage
+    # Save images to storage if available
     orig_file = _save_b64_image(result_data.get("original_b64"), f"{analysis_id}_orig.jpg")
     overlay_file = _save_b64_image(result_data.get("overlay_b64"), f"{analysis_id}_overlay.png")
     ig_file = _save_b64_image(result_data.get("ig_b64"), f"{analysis_id}_ig.png")
@@ -163,7 +163,7 @@ def save_analysis_record(result_data: dict, patient_info: dict, analysis_id: str
         json.dumps(result_data.get("characteristics", [])),
         result_data.get("treatment", ""),
         json.dumps(result_data.get("scores", {})),
-        result_data.get("model_used", "Multi-Model TTA Ensemble"),
+        result_data.get("model_used", "EfficientNetB0 (Production Optimized)"),
         result_data.get("description", ""),
         result_data.get("color", "#6366f1"),
         1 if result_data.get("is_uncertain") else 0,
@@ -177,11 +177,17 @@ def save_analysis_record(result_data: dict, patient_info: dict, analysis_id: str
     return analysis_id
 
 
-def get_all_history(search=None, prediction_filter=None, date_filter=None, sort_order="newest"):
-    """Fetches list of history records with filters and sorting."""
+def get_all_history(search=None, prediction_filter=None, date_filter=None, sort_order="newest", page=1, limit=20):
+    """Fetches paginated list of history metadata records with filters and sorting."""
     init_db()
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    try:
+        page = max(1, int(page))
+        limit = max(1, min(100, int(limit)))
+    except (ValueError, TypeError):
+        page, limit = 1, 20
 
     query = "SELECT * FROM analysis_history WHERE 1=1"
     params = []
@@ -193,7 +199,7 @@ def get_all_history(search=None, prediction_filter=None, date_filter=None, sort_
 
     if prediction_filter and prediction_filter != "all":
         p_val = prediction_filter.lower().strip()
-        if p_val == "notumor" or p_val == "no tumor":
+        if p_val in ("notumor", "no tumor"):
             query += " AND (LOWER(prediction) = 'no tumor' OR LOWER(prediction) = 'notumor')"
         else:
             query += " AND LOWER(prediction) LIKE ?"
@@ -209,6 +215,15 @@ def get_all_history(search=None, prediction_filter=None, date_filter=None, sort_
         query += " ORDER BY id ASC"
     else:
         query += " ORDER BY id DESC"
+
+    # Count total records matching filter
+    count_query = f"SELECT COUNT(*) FROM ({query})"
+    cursor.execute(count_query, params)
+    total_count = cursor.fetchone()[0]
+
+    # Apply pagination OFFSET and LIMIT
+    offset = (page - 1) * limit
+    query += f" LIMIT {limit} OFFSET {offset}"
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
@@ -239,7 +254,12 @@ def get_all_history(search=None, prediction_filter=None, date_filter=None, sort_
         })
 
     conn.close()
-    return records
+    return {
+        "records": records,
+        "total": total_count,
+        "page": page,
+        "limit": limit
+    }
 
 
 def get_history_stats():

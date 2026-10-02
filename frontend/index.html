@@ -492,11 +492,17 @@
               </div>
               <div class="xai-item">
                 <img id="resultIG" src="" alt="Integrated Gradients" class="result-image" />
-                <div class="xai-badge ig-badge">Integrated Gradients</div>
+                <div class="xai-badge ig-badge">
+                  Integrated Gradients
+                  <button type="button" class="btn-xai-trigger" id="btnGenIG" onclick="fetchXAI('ig', this)">⚡ Generate</button>
+                </div>
               </div>
               <div class="xai-item">
                 <img id="resultLIME" src="" alt="LIME Attribution" class="result-image" />
-                <div class="xai-badge lime-badge">MRI + Heatmap Overlay</div>
+                <div class="xai-badge lime-badge">
+                  LIME Attribution
+                  <button type="button" class="btn-xai-trigger" id="btnGenLIME" onclick="fetchXAI('lime', this)">⚡ Generate</button>
+                </div>
               </div>
             </div>
 

@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroScan AI — Confidence-Calibrated & Explainable Brain MRI Platform</title>
+  <meta name="description"
+    content="Advanced AI Research Platform for Confidence-Calibrated, Robust and Explainable Multi-Model Brain MRI Classification." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ══════════════ NEUROSCAN AI WELCOME / LOGIN SCREEN ══════════════ -->
+  <section id="authScreen" class="ns-auth-screen">
+    <div class="ns-auth-ambient-bg">
+      <div class="ns-glow-orb orb-1"></div>
+      <div class="ns-glow-orb orb-2"></div>
+      <div class="ns-grid-pattern"></div>
+    </div>
+
+    <div class="ns-auth-container">
+      <div class="ns-auth-layout">
+        
+        <!-- LEFT COLUMN: Medical AI Branding & Context -->
+        <div class="ns-auth-hero">
+          <div class="ns-hero-badge">
+            <svg class="ns-badge-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z"/>
+              <path d="M12 6v12M6 12h12"/>
+              <circle cx="12" cy="12" r="3" fill="#06b6d4" />
+            </svg>
+            <span>Medical AI Platform v2.0</span>
+          </div>
+
+          <h1 class="ns-hero-title">
+            Welcome to <br />
+            <span class="ns-gradient-text">NeuroScan AI</span>
+          </h1>
+
+          <p class="ns-hero-subtitle">
+            AI-powered brain MRI analysis for early tumor detection
+          </p>
+
+          <p class="ns-hero-description">
+            Upload and analyze brain MRI scans using advanced AI models designed to assist medical professionals with calibrated confidence scores and explainable diagnostic insights.
+          </p>
+
+          <!-- Interactive Medical AI Hero Illustration -->
+          <div class="ns-hero-illustration">
+            <div class="ns-scanner-ring"></div>
+            <div class="ns-brain-svg-wrap">
+              <svg width="150" height="150" viewBox="0 0 100 100" fill="none">
+                <circle cx="50" cy="50" r="42" stroke="rgba(6, 182, 212, 0.3)" stroke-width="1.5" stroke-dasharray="4 4"/>
+                <path d="M50 15 C30 15 18 30 18 50 C18 70 32 82 50 82 C68 82 82 70 82 50 C82 30 70 15 50 15 Z" fill="url(#brainGrad)" opacity="0.12"/>
+                <!-- Left Hemisphere -->
+                <path d="M47 22 C34 22 24 32 24 48 C24 64 34 76 47 78 Z" stroke="#0284c7" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <!-- Right Hemisphere -->
+                <path d="M53 22 C66 22 76 32 76 48 C76 64 66 76 53 78 Z" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <!-- Center Connections -->
+                <path d="M47 34 C42 40 42 60 47 66 M53 34 C58 40 58 60 53 66" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+                <!-- Pulse Neural Nodes -->
+                <circle cx="34" cy="36" r="3.5" fill="#0284c7"><animate attributeName="r" values="3.5;5.5;3.5" dur="2s" repeatCount="indefinite"/></circle>
+                <circle cx="66" cy="36" r="3.5" fill="#06b6d4"><animate attributeName="r" values="3.5;5.5;3.5" dur="2.5s" repeatCount="indefinite"/></circle>
+                <circle cx="30" cy="54" r="3.5" fill="#818cf8"><animate attributeName="r" values="3.5;5.5;3.5" dur="1.8s" repeatCount="indefinite"/></circle>
+                <circle cx="70" cy="54" r="3.5" fill="#38bdf8"><animate attributeName="r" values="3.5;5.5;3.5" dur="2.2s" repeatCount="indefinite"/></circle>
+                <circle cx="50" cy="48" r="4.5" fill="#0369a1"><animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite"/></circle>
+                <!-- Connections -->
+                <line x1="34" y1="36" x2="50" y2="48" stroke="#0284c7" stroke-width="1.2" opacity="0.6"/>
+                <line x1="66" y1="36" x2="50" y2="48" stroke="#06b6d4" stroke-width="1.2" opacity="0.6"/>
+                <line x1="30" y1="54" x2="50" y2="48" stroke="#818cf8" stroke-width="1.2" opacity="0.6"/>
+                <line x1="70" y1="54" x2="50" y2="48" stroke="#38bdf8" stroke-width="1.2" opacity="0.6"/>
+                <defs>
+                  <linearGradient id="brainGrad" x1="0" y1="0" x2="100" y2="100">
+                    <stop offset="0%" stop-color="#0284c7"/>
+                    <stop offset="100%" stop-color="#06b6d4"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+            <div class="ns-scan-beam"></div>
+          </div>
+
+          <!-- Feature Cards Grid (4 Floating Cards) -->
+          <div class="ns-hero-features-grid">
+            <div class="ns-feat-card">
+              <div class="ns-feat-icon">🧠</div>
+              <div class="ns-feat-text">
+                <span class="ns-feat-title">MRI Analysis</span>
+                <span class="ns-feat-sub">Multi-sequence Scan Screening</span>
+              </div>
+            </div>
+
+            <div class="ns-feat-card">
+              <div class="ns-feat-icon">🎯</div>
+              <div class="ns-feat-text">
+                <span class="ns-feat-title">AI Assisted Detection</span>
+                <span class="ns-feat-sub">Temperature-Scaled Confidence</span>
+              </div>
+            </div>
+
+            <div class="ns-feat-card">
+              <div class="ns-feat-icon">🔬</div>
+              <div class="ns-feat-text">
+                <span class="ns-feat-title">Tumor Classification</span>
+                <span class="ns-feat-sub">Glioma, Meningioma, Pituitary</span>
+              </div>
+            </div>
+
+            <div class="ns-feat-card">
+              <div class="ns-feat-icon">🛡️</div>
+              <div class="ns-feat-text">
+                <span class="ns-feat-title">Secure Medical Data</span>
+                <span class="ns-feat-sub">Calibrated & Explainable Research</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Authentication Card -->
+        <div class="ns-auth-card-wrap">
+          <div class="ns-auth-card">
+            
+            <div class="ns-card-header">
+              <div class="ns-brand-logo-badge">
+                <span class="ns-brand-logo-icon">🧠</span>
+              </div>
+              <h2 class="ns-card-title">Sign in to NeuroScan AI</h2>
+              <p class="ns-card-subtitle">Access your clinical & research workspace</p>
+            </div>
+
+            <!-- Social Authentication Buttons -->
+            <div class="ns-oauth-buttons">
+              <button type="button" class="ns-btn-oauth" id="googleAuthBtn" aria-label="Sign in with Google">
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                <span>Sign in with Google</span>
+              </button>
+
+              <button type="button" class="ns-btn-oauth" id="msAuthBtn" aria-label="Sign in with Microsoft">
+                <svg width="18" height="18" viewBox="0 0 23 23">
+                  <path fill="#f35325" d="M1 1h10v10H1z"/>
+                  <path fill="#81bc06" d="M12 1h10v10H12z"/>
+                  <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+                  <path fill="#ffba08" d="M12 12h10v10H12z"/>
+                </svg>
+                <span>Sign in with Microsoft</span>
+              </button>
+            </div>
+
+            <!-- Divider -->
+            <div class="ns-auth-divider">
+              <span>Or continue with NeuroScan AI</span>
+            </div>
+
+            <!-- Error Feedback Alert Banner -->
+            <div class="ns-auth-alert hidden" id="authErrorMessage" role="alert"></div>
+
+            <!-- Email & Password Form -->
+            <form id="nsLoginForm" class="ns-auth-form" onsubmit="return false;">
+              <!-- Outlined Input: Email -->
+              <div class="ns-input-wrap">
+                <label for="nsEmail" class="ns-floating-label">Email</label>
+                <input type="email" id="nsEmail" class="ns-input" placeholder="Enter your email" autocomplete="username email" required aria-required="true" />
+              </div>
+
+              <!-- Outlined Input: Password -->
+              <div class="ns-input-wrap">
+                <label for="nsPassword" class="ns-floating-label">Password</label>
+                <div class="ns-password-box">
+                  <input type="password" id="nsPassword" class="ns-input" placeholder="Enter your password" autocomplete="current-password" required aria-required="true" />
+                  <button type="button" class="ns-pwd-btn" id="nsPwdToggleBtn" aria-label="Toggle password visibility">👁️</button>
+                </div>
+              </div>
+
+              <!-- Forgot Password Link -->
+              <div class="ns-forgot-wrap">
+                <a href="#" class="ns-link-sm" id="nsForgotPwdLink">Forgot your password?</a>
+              </div>
+
+              <!-- Action Buttons Row -->
+              <div class="ns-actions-row">
+                <button type="button" class="ns-btn-cancel" id="nsCancelBtn">Cancel</button>
+                <button type="submit" class="ns-btn-submit" id="nsSignInBtn">
+                  <span class="ns-btn-label">Sign In</span>
+                  <span class="ns-btn-loader hidden" id="nsSignInSpinner"></span>
+                </button>
+              </div>
+            </form>
+
+            <!-- Bottom Sign Up Link -->
+            <div class="ns-card-footer">
+              <span>Don't have an account?</span>
+              <a href="#" class="ns-link-highlight" id="nsSignUpLink">Sign Up</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Medical Disclaimer Footer -->
+      <footer class="ns-auth-disclaimer">
+        <p>⚕️ <strong>NeuroScan AI</strong> is an AI-assisted screening tool and is not a substitute for professional medical diagnosis.</p>
+      </footer>
+    </div>
+  </section>
+
+  <!-- ══════════════ NAVBAR ══════════════ -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-inner">
+      <div class="nav-brand">
+        <div class="brain-icon">🧠</div>
+        <span class="brand-text">NeuroScan <span class="brand-ai">AI</span> <span
+            class="research-tag">RESEARCH</span></span>
+      </div>
+
+      <!-- Tab Navigation Links -->
+      <div class="nav-tabs">
+        <button class="nav-tab active" data-tab="tab-single">🔍 Single MRI Analysis</button>
+        <button class="nav-tab" data-tab="tab-history">📜 Analysis History</button>
+        <button class="nav-tab" data-tab="tab-lab">🧪 Model Laboratory</button>
+        <button class="nav-tab" data-tab="tab-calibration">🎯 Calibration & Reliability</button>
+        <button class="nav-tab" data-tab="tab-robustness">🛡️ Robustness Testing</button>
+        <button class="nav-tab" data-tab="tab-errors">❌ Error Analysis</button>
+        <button class="nav-tab" data-tab="tab-ablation">📊 Ablation & CSV Export</button>
+      </div>
+
+      <div class="nav-right-wrap">
+        <!-- User Profile Badge -->
+        <div class="user-profile-badge hidden" id="userProfileBadge">
+          <div class="user-avatar" id="userAvatar">U</div>
+          <div class="user-info-text">
+            <span class="user-name" id="userName">User</span>
+            <span class="user-role" id="userRole">Clinical Staff</span>
+          </div>
+          <button class="btn-signout" id="signOutBtn" title="Sign Out / Switch Account">🚪 Sign Out</button>
+        </div>
+
+        <div class="status-badge" id="serverStatus">
+          <span class="status-dot"></span>
+          <span id="statusText">Checking...</span>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ══════════════ MAIN WORKSPACE CONTAINER ══════════════ -->
+  <div id="mainWorkspace" class="main-workspace hidden">
+
+    <!-- HERO HEADER -->
+    <header class="hero-header">
+      <div class="container">
+        <h1 class="hero-title">
+          Confidence-Calibrated, Robust and Explainable<br />
+          <span class="gradient-text">Multi-Model Brain MRI Classification</span>
+        </h1>
+        <p class="hero-subtitle">
+          Comprehensive AI research platform combining transfer learning benchmarks, temperature scaling calibration,
+          perturbation robustness stress testing, multi-method XAI (Grad-CAM, Integrated Gradients, LIME), and
+          quantitative faithfulness verification.
+        </p>
+      </div>
+    </header>
+
+  <!-- ══════════════ MAIN CONTENT CONTAINER ══════════════ -->
+  <main class="main-container container">
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 1: SINGLE MRI ANALYSIS (DYNAMIC METADATA INTERFACE)
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane active" id="tab-single">
+      <section class="section">
+
+        <div class="section-header">
+          <h2 class="section-title">Upload Brain MRI Scan</h2>
+          <p class="section-subtitle">Select a real MRI scan file or choose from known dataset samples</p>
+        </div>
+
+        <!-- 1. PATIENT & DIAGNOSTIC METADATA (5 COLUMNS, DYNAMIC EDITABLE INPUTS) -->
+        <div class="card patient-card">
+          <div class="card-header">
+            <span class="card-icon">📋</span>
+            <h3 class="card-title-sm">Patient & Diagnostic Metadata</h3>
+          </div>
+          <div class="patient-grid">
+            <div class="input-group">
+              <label for="ptName">Patient Name</label>
+              <input type="text" id="ptName" placeholder="Enter patient name" autocomplete="off" class="form-input" />
+            </div>
+            <div class="input-group">
+              <label for="ptId">Patient ID</label>
+              <input type="text" id="ptId" placeholder="e.g. PT-2026-01" autocomplete="off" class="form-input" />
+            </div>
+            <div class="input-group">
+              <label for="ptAge">Age</label>
+              <input type="number" id="ptAge" min="1" max="120" placeholder="Age" autocomplete="off" class="form-input" />
+            </div>
+            <div class="input-group">
+              <label for="ptGender">Gender</label>
+              <select id="ptGender" class="form-select">
+                <option>Male</option>
+                <option>Female</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="refDoctor">Referring Doctor</label>
+              <input type="text" id="refDoctor" placeholder="Enter referring doctor name" autocomplete="name" class="form-input" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. LARGE DRAG & DROP MRI UPLOAD BOX (VISIBLE ON LANDING) -->
+        <div class="upload-box card" id="uploadBox">
+          <input type="file" id="fileInput" accept="image/*" class="file-input" />
+          <div class="upload-content" id="uploadContent">
+            <div class="upload-icon">📁</div>
+            <p class="upload-text">Drag & drop your MRI scan here or <span class="highlight">browse files</span></p>
+            <p class="upload-hint">Supports PNG, JPG, JPEG, BMP, TIFF, WEBP (Max 16 MB)</p>
+          </div>
+        </div>
+
+        <!-- MRI PREVIEW CARD (Shown when image is selected) -->
+        <div class="card preview-card hidden" id="previewCard">
+          <div class="preview-body">
+            <div class="preview-img-wrap">
+              <img id="previewImg" src="" alt="Uploaded Scan Preview" />
+            </div>
+            <div class="preview-details">
+              <div class="preview-meta-row">
+                <span class="meta-lbl">File Name:</span>
+                <span id="previewFname" class="meta-val">scan.jpg</span>
+              </div>
+              <div class="preview-meta-row">
+                <span class="meta-lbl">File Size:</span>
+                <span id="previewFsize" class="meta-val">0 KB</span>
+              </div>
+              <div class="preview-meta-row">
+                <span class="meta-lbl">Image Dimensions:</span>
+                <span id="previewFdims" class="meta-val">224 × 224 px</span>
+              </div>
+
+              <!-- Dedicated Modality Verification Status Card -->
+              <div class="modality-status-card mri-pending" id="modalityStatusCard">
+                <div class="modality-header">
+                  <span class="modality-icon" id="modalityIcon">🔍</span>
+                  <span class="modality-title" id="modalityTitle">Ready for Modality Check</span>
+                </div>
+                <div class="modality-meta">
+                  <span>Detected Modality: <strong id="modalityDetectedText">Pending</strong></span>
+                  <span>Modality Confidence: <strong id="modalityConfText">—</strong></span>
+                </div>
+                <p class="modality-msg" id="modalityStatusMsg">Click 'Analyze MRI' to run validation pipeline.</p>
+              </div>
+            </div>
+          </div>
+          <div class="preview-actions">
+            <button class="btn-secondary" id="changeMriBtn">Change Image</button>
+          </div>
+        </div>
+
+        <!-- DATASET SAMPLE SELECTION -->
+        <div class="sample-section">
+          <p class="sample-title">Or test with real dataset sample scans:</p>
+          <div class="sample-grid" id="sampleGrid">
+            <div class="sample-card" data-class="glioma">
+              <span class="sample-badge glioma">Glioma</span>
+              <span>Load Glioma Sample</span>
+            </div>
+            <div class="sample-card" data-class="meningioma">
+              <span class="sample-badge meningioma">Meningioma</span>
+              <span>Load Meningioma Sample</span>
+            </div>
+            <div class="sample-card" data-class="notumor">
+              <span class="sample-badge notumor">No Tumor</span>
+              <span>Load Normal Sample</span>
+            </div>
+            <div class="sample-card" data-class="pituitary">
+              <span class="sample-badge pituitary">Pituitary</span>
+              <span>Load Pituitary Sample</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ANALYZE MRI BUTTON -->
+        <div class="action-wrap">
+          <button class="btn-primary btn-lg" id="analyzeBtn" disabled>
+            ⚡ Analyze MRI
+          </button>
+        </div>
+
+        <!-- LOADING PROGRESS OVERLAY -->
+        <div class="loading-overlay hidden" id="loadingOverlay">
+          <div class="spinner"></div>
+          <p class="loading-title" id="loadingTitleText">Processing MRI Pipeline...</p>
+          <div class="loading-steps">
+            <div class="loading-step active" id="step1">
+              <div class="step-dot"></div>
+              <span>Validating MRI...</span>
+            </div>
+            <div class="loading-step" id="step2">
+              <div class="step-dot"></div>
+              <span>Preprocessing MRI...</span>
+            </div>
+            <div class="loading-step" id="step3">
+              <div class="step-dot"></div>
+              <span>Running AI analysis...</span>
+            </div>
+            <div class="loading-step" id="step4">
+              <div class="step-dot"></div>
+              <span>Generating result...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. AI ANALYSIS RESULTS SECTION (RENDERED BELOW ON SAME PAGE) -->
+        <div class="results-section hidden" id="resultsSection">
+
+          <!-- Invalid Scan Alert -->
+          <div class="invalid-scan-card card hidden" id="invalidScanAlert">
+            <div class="invalid-scan-header">
+              <div class="invalid-scan-icon">⚠️</div>
+              <div>
+                <h3 class="invalid-scan-title" id="invalidAlertTitle">Invalid image. Please upload a valid brain MRI
+                  scan.</h3>
+                <p class="invalid-scan-subtitle" id="invalidAlertSubtitle">Input validation failed for standard brain
+                  MRI scan criteria.</p>
+              </div>
+            </div>
+            <ul class="invalid-reasons-list" id="invalidReasonsList"></ul>
+          </div>
+
+          <!-- Uncertainty Warning Banner -->
+          <div class="uncertainty-banner card hidden" id="uncertaintyBanner">
+            <div class="uncertainty-icon">⚠️</div>
+            <div>
+              <h3 class="uncertainty-title">UNCERTAIN PREDICTION</h3>
+              <p class="uncertainty-desc" id="uncertaintyDesc">The model cannot confidently distinguish between top
+                classes.</p>
+            </div>
+          </div>
+
+          <!-- Diagnosis Banner -->
+          <div class="diagnosis-banner card" id="diagnosisBanner">
+            <div class="diagnosis-left">
+              <div class="diagnosis-icon" id="diagIcon">🧠</div>
+              <div class="diagnosis-info">
+                <div class="diagnosis-label">Tumor Detection Summary</div>
+                <div class="diagnosis-name" id="diagnosisName">—</div>
+                <div class="diagnosis-desc" id="diagnosisDesc">—</div>
+              </div>
+            </div>
+            <div class="diagnosis-right">
+              <div class="conf-box">
+                <div class="conf-value" id="calibratedConfVal">0%</div>
+                <div class="conf-label">Calibrated Confidence</div>
+              </div>
+              <div class="conf-box raw-box">
+                <div class="conf-value-sm" id="rawConfVal">0%</div>
+                <div class="conf-label">Raw Confidence</div>
+              </div>
+              <div class="severity-badge" id="severityBadge">
+                <span id="severityText">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Multi-XAI Side-by-Side Visualizer -->
+          <div class="card xai-card">
+            <div class="card-header">
+              <span class="card-icon">🔥</span>
+              <h3 class="card-title-sm">Explainable AI (Grad-CAM · Integrated Gradients · LIME)</h3>
+            </div>
+            <div class="xai-grid">
+              <div class="xai-item">
+                <img id="resultOriginal" src="" alt="Original MRI" class="result-image" />
+                <div class="xai-badge">Original MRI</div>
+              </div>
+              <div class="xai-item">
+                <img id="resultOverlay" src="" alt="Grad-CAM Heatmap" class="result-image" />
+                <div class="xai-badge gradcam-badge">Grad-CAM Heatmap</div>
+              </div>
+              <div class="xai-item">
+                <img id="resultIG" src="" alt="Integrated Gradients" class="result-image" />
+                <div class="xai-badge ig-badge">
+                  Integrated Gradients
+                  <button type="button" class="btn-xai-trigger" id="btnGenIG" onclick="fetchXAI('ig', this)">⚡ Generate</button>
+                </div>
+              </div>
+              <div class="xai-item">
+                <img id="resultLIME" src="" alt="LIME Attribution" class="result-image" />
+                <div class="xai-badge lime-badge">
+                  LIME Attribution
+                  <button type="button" class="btn-xai-trigger" id="btnGenLIME" onclick="fetchXAI('lime', this)">⚡ Generate</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Model Attention Region Note -->
+            <div class="attention-note">
+              🎯 <strong>Explainable AI Guidance:</strong> Highlighted regions indicate areas that influenced the model
+              prediction and are provided for research/educational interpretation.
+            </div>
+
+            <!-- Quantitative Faithfulness Evaluation Card -->
+            <div class="faithfulness-box" id="faithfulnessBox">
+              <div class="faithfulness-header">
+                <span class="faithfulness-title">🧪 Quantitative Explainability Faithfulness Evaluation</span>
+                <span class="faithfulness-badge" id="faithfulnessBadge">FAITHFUL</span>
+              </div>
+              <div class="faithfulness-grid">
+                <div class="f-stat">
+                  <span class="f-label">Important Region Confidence Drop:</span>
+                  <span class="f-val text-danger" id="impDropVal">0.0%</span>
+                </div>
+                <div class="f-stat">
+                  <span class="f-label">Random Region Confidence Drop:</span>
+                  <span class="f-val text-muted" id="randDropVal">0.0%</span>
+                </div>
+              </div>
+              <p class="f-desc" id="faithfulnessDesc">
+                Masking top important regions caused a significantly larger drop in model prediction confidence than
+                masking random regions, demonstrating faithful explanation evidence.
+              </p>
+            </div>
+          </div>
+
+          <!-- Calibrated Confidence Scores -->
+          <div class="card" id="scoresCard">
+            <div class="card-header">
+              <span class="card-icon">📊</span>
+              <h3 class="card-title-sm">Classification Confidence Scores (Calibrated)</h3>
+            </div>
+            <div class="scores-grid" id="scoresGrid"></div>
+          </div>
+
+          <!-- Characteristics & Treatment -->
+          <div class="results-grid">
+            <div class="card">
+              <div class="card-header">
+                <span class="card-icon">🧬</span>
+                <h3 class="card-title-sm">Tumor Characteristics</h3>
+              </div>
+              <ul class="char-list" id="characteristicsList"></ul>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <span class="card-icon">🩺</span>
+                <h3 class="card-title-sm">Recommended Medical Management</h3>
+              </div>
+              <p class="treatment-text" id="treatmentText">—</p>
+            </div>
+          </div>
+
+          <!-- AI Analysis Result Summary Card -->
+          <div class="card summary-card" id="finalResultCard">
+            <div class="card-header">
+              <span class="card-icon">📋</span>
+              <h3 class="card-title-sm">AI Analysis Result</h3>
+            </div>
+            <div class="result-meta-grid">
+              <div class="res-item"><span class="res-lbl">Patient Name:</span><span class="res-val"
+                  id="resPtName">—</span></div>
+              <div class="res-item"><span class="res-lbl">Patient ID:</span><span class="res-val" id="resPtId">—</span>
+              </div>
+              <div class="res-item"><span class="res-lbl">Age / Gender:</span><span class="res-val"
+                  id="resPtAgeGender">—</span></div>
+              <div class="res-item"><span class="res-lbl">Referring Doctor:</span><span class="res-val"
+                  id="resRefDoctor">—</span></div>
+              <div class="res-item"><span class="res-lbl">File Name:</span><span class="res-val"
+                  id="resFileName">—</span></div>
+              <div class="res-item"><span class="res-lbl">Tumor Status:</span><span class="res-val"
+                  id="resTumorStatus">—</span></div>
+              <div class="res-item"><span class="res-lbl">Prediction:</span><span class="res-val"
+                  id="resTumorType">—</span></div>
+              <div class="res-item"><span class="res-lbl">Confidence Score:</span><span class="res-val"
+                  id="resConfidence">—</span></div>
+              <div class="res-item"><span class="res-lbl">Model Used:</span><span class="res-val"
+                  id="resModelName">—</span></div>
+              <div class="res-item"><span class="res-lbl">Analysis Date & Time:</span><span class="res-val"
+                  id="resDateTime">—</span></div>
+            </div>
+          </div>
+
+          <!-- Export Action Buttons -->
+          <div class="final-actions-wrap">
+            <button class="btn-secondary" id="printPdfBtn">🖨️ Print Report</button>
+            <button class="btn-primary" id="downloadPdfBtn">📥 Download Report</button>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 2: MODEL LABORATORY (BENCHMARK COMPARISON)
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-lab">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">Model Laboratory & Benchmarks</h2>
+          <p class="section-subtitle">Comparative evaluation across Custom CNN, ResNet50, EfficientNetB0, MobileNetV2,
+            and Ensemble Model on 1,600 test images</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">🏆</span>
+            <h3 class="card-title-sm">Multi-Model Performance Matrix</h3>
+            <button class="btn-sm" id="reloadLabBtn">🔄 Refresh Metrics</button>
+          </div>
+          <div class="table-responsive">
+            <table class="lab-table" id="modelCompTable">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Accuracy</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>F1-Score</th>
+                  <th>Glioma Rec.</th>
+                  <th>Meningioma Rec.</th>
+                  <th>NoTumor Rec.</th>
+                  <th>Pituitary Rec.</th>
+                  <th>Parameters</th>
+                  <th>Inf. Time</th>
+                </tr>
+              </thead>
+              <tbody id="modelCompTbody">
+                <tr>
+                  <td colspan="11" class="text-center">Loading model benchmarks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card best-model-box" id="bestModelBox">
+          <div class="best-model-header">
+            <span class="best-icon">⭐</span>
+            <div>
+              <h3 class="best-title" id="bestModelTitle">Selected Best Model</h3>
+              <p class="best-subtitle" id="bestModelSubtitle">Identified based on balanced F1-score and class recall
+                balance across all 4 categories.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 3: CALIBRATION & RELIABILITY
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-calibration">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">Probability Calibration & Reliability</h2>
+          <p class="section-subtitle">Temperature Scaling optimization on validation set to align model confidence with
+            empirical accuracy</p>
+        </div>
+
+        <div class="metrics-row">
+          <div class="card metric-card">
+            <div class="metric-val" id="eceBeforeVal">0.0%</div>
+            <div class="metric-lbl">Expected Calibration Error (Before)</div>
+          </div>
+          <div class="card metric-card accent-card">
+            <div class="metric-val" id="eceAfterVal">0.0%</div>
+            <div class="metric-lbl">Expected Calibration Error (After)</div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-val" id="tempVal">1.000</div>
+            <div class="metric-lbl">Optimal Temperature Parameter (T)</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">📈</span>
+            <h3 class="card-title-sm">Reliability Diagram & Calibration Bins</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="lab-table">
+              <thead>
+                <tr>
+                  <th>Confidence Bin Range</th>
+                  <th>Sample Count</th>
+                  <th>Avg. Bin Confidence</th>
+                  <th>Empirical Accuracy</th>
+                  <th>Calibration Gap (|Conf - Acc|)</th>
+                </tr>
+              </thead>
+              <tbody id="calibrationTbody">
+                <tr>
+                  <td colspan="5" class="text-center">Loading calibration bins...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 4: ROBUSTNESS TESTING
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-robustness">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">Robustness & Perturbation Stress Testing</h2>
+          <p class="section-subtitle">Evaluating model classification stability under real-world visual scan
+            perturbations and artifacts</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">🛡️</span>
+            <h3 class="card-title-sm">Perturbation Performance Matrix (7 Transformations)</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="lab-table">
+              <thead>
+                <tr>
+                  <th>Transformation Type</th>
+                  <th>Accuracy</th>
+                  <th>F1-Score</th>
+                  <th>Confidence Density</th>
+                  <th>Confidence Change</th>
+                  <th>Decision Stability (%)</th>
+                </tr>
+              </thead>
+              <tbody id="robustnessTbody">
+                <tr>
+                  <td colspan="6" class="text-center">Loading robustness benchmarks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 5: ERROR ANALYSIS
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-errors">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">Model Error Analysis & Misclassification Study</h2>
+          <p class="section-subtitle">Deep dive inspection into misclassified test set images and boundary failure modes
+          </p>
+        </div>
+
+        <div class="metrics-row">
+          <div class="card metric-card">
+            <div class="metric-val" id="totalTestVal">1,600</div>
+            <div class="metric-lbl">Total Test Images</div>
+          </div>
+          <div class="card metric-card accent-card">
+            <div class="metric-val text-success" id="correctVal">1,445</div>
+            <div class="metric-lbl">Correct Predictions</div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-val text-danger" id="incorrectVal">155</div>
+            <div class="metric-lbl">Total Misclassifications</div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-val text-warning" id="gliomaMeningiomaErrorsVal">81</div>
+            <div class="metric-lbl">Glioma ↔ Meningioma Errors</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">🖼️</span>
+            <h3 class="card-title-sm">Misclassified MRI Visual Gallery</h3>
+          </div>
+          <div class="error-gallery" id="errorGallery">
+            <p class="text-center text-muted">Loading misclassification gallery...</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 6: ABLATION STUDY & CSV EXPORT
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-ablation">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">7-Stage Research Ablation Study</h2>
+          <p class="section-subtitle">Incremental baseline-to-advanced feature ablation evaluation across the entire
+            experimental framework</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">📊</span>
+            <h3 class="card-title-sm">Ablation Study Summary</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="lab-table">
+              <thead>
+                <tr>
+                  <th>Experiment Stage</th>
+                  <th>Accuracy</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>F1-Score</th>
+                  <th>ECE (%)</th>
+                </tr>
+              </thead>
+              <tbody id="ablationTbody">
+                <tr>
+                  <td colspan="6" class="text-center">Loading ablation study data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+       TAB 7: ANALYSIS HISTORY (PERSISTENT CLINICAL DATABASE)
+  ─────────────────────────────────────────────────────────────── -->
+    <div class="tab-pane hidden" id="tab-history">
+      <section class="section">
+        <div class="section-header">
+          <h2 class="section-title">Analysis History</h2>
+          <p class="section-subtitle">Comprehensive archive of saved MRI scan classifications, patient diagnostic metadata, and explainability maps</p>
+        </div>
+
+        <!-- 1. DASHBOARD STATS CARDS -->
+        <div class="metrics-row history-metrics-grid">
+          <div class="card metric-card">
+            <div class="metric-val" id="histStatTotal">0</div>
+            <div class="metric-lbl">Total Analyses</div>
+          </div>
+          <div class="card metric-card accent-card">
+            <div class="metric-val text-primary" id="histStatToday">0</div>
+            <div class="metric-lbl">Today</div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-val text-danger" id="histStatTumor">0</div>
+            <div class="metric-lbl">Tumor Detected</div>
+          </div>
+          <div class="card metric-card">
+            <div class="metric-val text-success" id="histStatNormal">0</div>
+            <div class="metric-lbl">Normal</div>
+          </div>
+        </div>
+
+        <!-- 2. SEARCH & FILTER CONTROLS BAR -->
+        <div class="card history-filter-card">
+          <div class="history-filter-grid">
+            <div class="input-group">
+              <label for="histSearchInput">Search History</label>
+              <input type="text" id="histSearchInput" placeholder="Search Patient, ID, MRI File, or Analysis ID..." class="form-input" autocomplete="off" />
+            </div>
+            <div class="input-group">
+              <label for="histPredictionFilter">Filter by Class</label>
+              <select id="histPredictionFilter" class="form-select">
+                <option value="all">All Predictions</option>
+                <option value="glioma">Glioma</option>
+                <option value="meningioma">Meningioma</option>
+                <option value="notumor">No Tumor</option>
+                <option value="pituitary">Pituitary Tumor</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="histDateFilter">Filter by Date</label>
+              <select id="histDateFilter" class="form-select">
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="histSortOrder">Sort Order</label>
+              <select id="histSortOrder" class="form-select">
+                <option value="newest">Newest → Oldest</option>
+                <option value="oldest">Oldest → Newest</option>
+              </select>
+            </div>
+            <div class="history-clear-wrap">
+              <button type="button" class="btn-secondary btn-danger-outline" id="clearAllHistoryBtn">🗑️ Clear All History</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. HISTORY RECORDS TABLE -->
+        <div class="card history-table-card">
+          <div class="table-responsive">
+            <table class="lab-table history-table" id="historyTable">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Patient</th>
+                  <th>Patient ID</th>
+                  <th>MRI File</th>
+                  <th>Prediction</th>
+                  <th>Confidence</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="historyTbody">
+                <tr>
+                  <td colspan="8" class="text-center">Loading analysis history...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Empty History Message State -->
+          <div class="empty-history-card hidden" id="emptyHistoryCard">
+            <div class="empty-history-icon">📜</div>
+            <h3 class="empty-history-title">No analysis history available.</h3>
+            <p class="empty-history-subtitle">Completed MRI scan analyses will automatically be recorded and stored here for clinical reference.</p>
+          </div>
+        </div>
+
+      </section>
+    </div>
+
+  </main>
+
+  <!-- ─────────────────────────────────────────────────────────────
+     HISTORICAL ANALYSIS DETAILS MODAL DIALOG
+─────────────────────────────────────────────────────────────── -->
+  <div class="ns-modal-backdrop hidden" id="historyModalBackdrop">
+    <div class="ns-modal-dialog">
+      <div class="ns-modal-header">
+        <div class="ns-modal-title-wrap">
+          <span class="ns-modal-badge" id="modalAnalysisId">ANA-00001</span>
+          <h2 class="ns-modal-title" id="modalPatientTitle">Analysis Details</h2>
+        </div>
+        <button type="button" class="ns-modal-close" id="closeHistoryModalBtn">✕</button>
+      </div>
+
+      <div class="ns-modal-body" id="historyModalBody">
+        <!-- Dynamically populated by JS -->
+      </div>
+
+      <div class="ns-modal-footer">
+        <button type="button" class="btn-secondary" id="closeModalFooterBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <p>NeuroScan AI — Confidence-Calibrated & Explainable Multi-Model Brain MRI Research Platform</p>
+      <p class="footer-note">For Research and Educational Evaluation Purposes Only.</p>
+    </div>
+  </footer>
+
+  </div><!-- end #mainWorkspace -->
+
+  <script src="app.js"></script>
+</body>
+
+</html>
